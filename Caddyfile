@@ -1,0 +1,21 @@
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		# Telegram opens the panel inside its own WebView, so framing must stay allowed for
+		# telegram.org while everything else is locked down.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors https://web.telegram.org https://telegram.org; base-uri 'none'; form-action 'none'"
+		-Server
+	}
+
+	# The panel is the only thing served; nothing here should ever be indexed.
+	handle /robots.txt {
+		respond "User-agent: *\nDisallow: /" 200
+	}
+
+	reverse_proxy app:8080
+}

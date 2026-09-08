@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Нейропостинг</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h4l2 3h6l2-3h4"/><path d="M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
+  <symbol id="i-ads" viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/></symbol>
+  <symbol id="i-sources" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 16.2a6 6 0 0 0 0-8.4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 19.1a10 10 0 0 0 0-14.2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.4-3 8-7 9-4-1-7-4.6-7-9V6z"/><path d="M9.5 12.2l1.9 1.9 3.4-3.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.8 9.6 17 19 7.4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.7 4.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a4 4 0 0 0 5.7.3l3-3A4 4 0 0 0 13 4.7l-1.4 1.4"/><path d="M14 11a4 4 0 0 0-5.7-.3l-3 3A4 4 0 0 0 11 19.3l1.4-1.4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17.2v.1"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15.5 12v2.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13"/></symbol>
+</svg>
+
+<div id="boot" class="boot"><span class="spinner"></span></div>
+
+<main id="app" hidden>
+  <header class="head">
+    <div class="brand">
+      <span class="mark"></span>
+      <div>
+        <h1>Нейропостинг</h1>
+        <p id="status" class="status">—</p>
+      </div>
+    </div>
+    <button id="openAdmin" class="ghost" hidden title="Админ-панель">
+      <svg class="ic"><use href="#i-shield"/></svg>
+    </button>
+  </header>
+
+  <div class="channelbar" id="channelBar">
+    <div class="select-wrap">
+      <select id="channelSelect"></select>
+    </div>
+    <button id="addChannel" class="ghost square" title="Добавить канал">
+      <svg class="ic"><use href="#i-plus"/></svg>
+    </button>
+  </div>
+
+  <div class="addrow" id="addChannelRow" hidden>
+    <input type="text" id="channelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off">
+    <button id="channelSubmit" class="accent square"><svg class="ic"><use href="#i-check"/></svg></button>
+  </div>
+
+  <!-- ворота по промокоду -->
+  <section id="gate" class="page" hidden>
+    <div class="card hero">
+      <svg class="ic xl"><use href="#i-key"/></svg>
+      <h2>Доступ по коду</h2>
+      <p class="muted">Введите промокод, который вы получили. Он открывает панель, задаёт лимит
+        постов в день и число каналов.</p>
+      <input type="text" id="promoInput" class="code" placeholder="ABCD-2345" maxlength="9"
+             autocapitalize="characters" autocorrect="off" spellcheck="false">
+      <button id="promoSubmit" class="accent wide">Активировать</button>
+      <p class="muted small" id="gateHint"></p>
+    </div>
+  </section>
+
+  <!-- подключение канала -->
+  <section id="onboarding" class="page" hidden>
+    <div class="card hero">
+      <svg class="ic xl"><use href="#i-sources"/></svg>
+      <h2>Подключите канал</h2>
+      <ol class="steps">
+        <li>Добавьте <b id="botName">бота</b> администратором канала и дайте право публиковать сообщения.</li>
+        <li>Введите ниже @username канала.</li>
+      </ol>
+      <input type="text" id="firstChannelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off">
+      <button id="firstChannelSubmit" class="accent wide">Добавить канал</button>
+    </div>
+  </section>
+
+  <!-- главная -->
+  <section id="page-home" class="page">
+    <div id="statsGrid" class="grid"></div>
+    <button id="publishNow" class="accent wide tall">
+      <svg class="ic"><use href="#i-bolt"/></svg> Опубликовать сейчас
+    </button>
+    <h3 class="section">Публикации · 7 дней</h3>
+    <div id="postsChart" class="card chart"></div>
+    <h3 class="section">Подписчики</h3>
+    <div id="subsChart" class="card chart"></div>
+    <h3 class="section">Система</h3>
+    <div id="system" class="card system"></div>
+  </section>
+
+  <!-- лента -->
+  <section id="page-feed" class="page" hidden>
+    <h3 class="section">На одобрение · <span id="pendingCount">0</span></h3>
+    <p class="hint">В чате с ботом ответьте на карточку своей правкой («короче», «без эмодзи») —
+      он перепишет. Ссылка или свой текст в чат — ручной пост.</p>
+    <div id="feed"></div>
+  </section>
+
+  <!-- реклама -->
+  <section id="page-ads" class="page" hidden>
+    <h3 class="section">Рекламодатели · <span id="adsCount">0</span></h3>
+    <p class="hint">Реклама, которую бот отсеял из ваших источников. Эти компании уже платят за
+      охват в вашей нише — с ними есть смысл связаться напрямую.</p>
+    <div id="ads"></div>
+  </section>
+
+  <!-- источники -->
+  <section id="page-sources" class="page" hidden>
+    <h3 class="section">Источники · <span id="sourcesCount">0</span></h3>
+    <p class="hint">Откуда бот берёт новости: @канал, ссылка t.me или адрес RSS-ленты.</p>
+    <div class="addrow">
+      <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss">
+      <button id="addSource" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
+    </div>
+    <div id="sources"></div>
+  </section>
+
+  <!-- настройки -->
+  <section id="page-settings" class="page" hidden>
+    <details class="card group" open>
+      <summary><span>Публикация</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <div class="body">
+        <label class="row">
+          <span><b>Автопостинг</b><i>публиковать без одобрения</i></span>
+          <input type="checkbox" data-field="autopost">
+        </label>
+        <label class="row">
+          <span><b>Пауза</b><i>не проверять источники</i></span>
+          <input type="checkbox" data-field="paused">
+        </label>
+        <p class="label">Задержка перед публикацией</p>
+        <div class="chips" id="delayChips"></div>
+        <p class="label">Темп: постов в день, равномерно в окне</p>
+        <div class="chips" id="paceChips"></div>
+        <div class="row">
+          <span><b>Окно публикации</b><i>часы по времени канала</i></span>
+          <span class="window">
+            <input type="number" min="0" max="23" data-field="window_start" class="num">
+            <em>—</em>
+            <input type="number" min="1" max="24" data-field="window_end" class="num">
+          </span>
+        </div>
+        <div class="row">
+          <span><b>Часовой пояс</b><i>для окна и дайджеста</i></span>
+          <span class="select-wrap compact"><select data-field="tz" id="tzSelect"></select></span>
+        </div>
+      </div>
+    </details>
+
+    <details class="card group">
+      <summary><span>Контент</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <div class="body">
+        <div class="quality">
+          <p class="quality-name" id="qualityTitle">Суперпостинг</p>
+          <input type="range" min="0" max="2" step="1" id="quality" class="slider">
+          <div class="slider-legend"><span>Быстро</span><span>Баланс</span><span>Суперпостинг</span></div>
+          <p class="hint" id="qualityHint"></p>
+        </div>
+
+        <p class="label">Инструкции нейросети: тон, темы, запреты — своими словами</p>
+        <textarea data-field="instructions" rows="4"
+          placeholder="Ищи новости про Москву, начинай со смайлика, пост не длиннее 180 слов"></textarea>
+        <button class="accent wide" data-save="instructions">Сохранить инструкции</button>
+
+        <p class="label">Стоп-слова: пост с любым из них отбрасывается сразу</p>
+        <textarea data-field="stopwords" rows="2" placeholder="казино, промокод, 18+"></textarea>
+        <button class="accent wide" data-save="stopwords">Сохранить стоп-слова</button>
+
+        <div class="row">
+          <span><b>Язык канала</b><i>посты переводятся на него</i></span>
+          <span class="select-wrap compact"><select data-field="lang" id="langSelect"></select></span>
+        </div>
+        <label class="row">
+          <span><b>Голос канала</b><i>подражать стилю ваших постов</i></span>
+          <input type="checkbox" data-field="channel_voice">
+        </label>
+        <label class="row">
+          <span><b>Только хиты</b><i>брать посты популярнее медианы источника</i></span>
+          <input type="checkbox" data-field="hits_only">
+        </label>
+        <label class="row">
+          <span><b>Только с медиа</b><i>пропускать посты без фото и видео</i></span>
+          <input type="checkbox" data-field="media_only">
+        </label>
+        <div class="row">
+          <span><b>Вечерний дайджест</b><i>короткие новости — одной сводкой</i></span>
+          <span class="pair">
+            <span class="select-wrap compact"><select data-field="digest_time" id="digestTime"></select></span>
+            <input type="checkbox" data-field="digest_enabled">
+          </span>
+        </div>
+      </div>
+    </details>
+
+    <details class="card group">
+      <summary><span>Оформление</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <div class="body">
+        <p class="hint">Подпись-ссылка под постами. Пустая ссылка ведёт на этот канал,
+          пустой текст — без подписи.</p>
+        <input type="text" data-field="signature_text" placeholder="Подписаться">
+        <input type="text" data-field="signature_url" id="sigUrl" placeholder="пусто — на этот канал">
+        <p class="label">Так это увидят в канале</p>
+        <div class="preview"><span id="sigPreview"></span></div>
+        <button class="accent wide" data-save="signature">Сохранить подпись</button>
+        <label class="row">
+          <span><b>Водяной знак</b><i>пришлите боту картинку с подписью «логотип»</i></span>
+          <input type="checkbox" data-field="watermark">
+        </label>
+      </div>
+    </details>
+
+    <details class="card group">
+      <summary><span>Ключ Gemini</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <div class="body">
+        <p class="hint">Свой ключ — свои лимиты. Пусто — используется общий ключ сервера.</p>
+        <input type="password" data-field="gemini_key" placeholder="AIza…">
+        <button class="accent wide" data-save="gemini_key">Сохранить ключ</button>
+      </div>
+    </details>
+
+    <div class="card group plan" id="planCard"></div>
+
+    <button id="deleteChannel" class="danger wide">
+      <svg class="ic"><use href="#i-trash"/></svg> Удалить канал из панели
+    </button>
+  </section>
+
+  <!-- админ -->
+  <section id="page-admin" class="page" hidden>
+    <div class="pagehead">
+      <button id="closeAdmin" class="ghost square"><svg class="ic"><use href="#i-back"/></svg></button>
+      <h2>Админ-панель</h2>
+    </div>
+    <div id="adminTotals" class="grid"></div>
+
+    <h3 class="section">Промокоды</h3>
+    <div class="card">
+      <div class="promo-form">
+        <span class="select-wrap"><select id="promoPlan"></select></span>
+        <input type="number" id="promoCount" value="5" min="1" max="50" class="num wide-num" title="сколько кодов">
+      </div>
+      <input type="text" id="promoNote" placeholder="комментарий: кому и за что (необязательно)">
+      <button id="promoCreate" class="accent wide">Выпустить коды</button>
+    </div>
+    <div id="promoList"></div>
+
+    <h3 class="section">Пользователи</h3>
+    <div id="adminUsers"></div>
+
+    <h3 class="section">Каналы</h3>
+    <div id="adminChannels"></div>
+  </section>
+
+  <nav class="nav" id="nav">
+    <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span>Главная</span></button>
+    <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span>Лента</span><i id="feedBadge" class="badge" hidden></i></button>
+    <button data-page="ads"><svg class="ic"><use href="#i-ads"/></svg><span>Реклама</span><i id="adsBadge" class="badge" hidden></i></button>
+    <button data-page="sources"><svg class="ic"><use href="#i-sources"/></svg><span>Источники</span></button>
+    <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span>Настройки</span></button>
+  </nav>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
