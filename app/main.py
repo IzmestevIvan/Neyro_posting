@@ -7,6 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from app import db
+from app.ai import gemini
 from app.api.server import create_app
 from app.bot.handlers import router as bot_router
 from app.config import BOT_TOKEN, HOST, PORT
@@ -34,10 +35,18 @@ async def main() -> None:
     me = await bot.get_me()
     log.info("бот @%s запущен", me.username)
 
+    # Фоном: три запроса к Gemini по 30 секунд таймаута задержали бы старт бота и
+    # завалили healthcheck контейнера, а знать про мёртвую модель надо не в первую секунду.
+    async def report_models() -> None:
+        for role, verdict in (await gemini.check_models()).items():
+            (log.info if "— ок" in verdict else log.error)("модель %s: %s", role, verdict)
+
+    model_check = asyncio.create_task(report_models())
+
     server = uvicorn.Server(
         uvicorn.Config(create_app(bot, me.username), host=HOST, port=PORT, log_level="warning")
     )
-    tasks = scheduler.start(bot)
+    tasks = [*scheduler.start(bot), model_check]
 
     try:
         await asyncio.gather(

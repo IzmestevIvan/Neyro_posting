@@ -32,6 +32,83 @@
 
 <div id="boot" class="boot"><span class="spinner"></span></div>
 
+<div id="tour" class="tour" hidden>
+  <button id="tourSkip" class="tour-skip">Пропустить</button>
+
+  <div class="tour-track" id="tourTrack">
+    <section class="slide">
+      <div class="art art-sources">
+        <span class="node n1"></span><span class="node n2"></span><span class="node n3"></span>
+        <span class="core"><svg class="ic"><use href="#i-sources"/></svg></span>
+        <span class="beam b1"></span><span class="beam b2"></span><span class="beam b3"></span>
+      </div>
+      <h2>Вы выбираете источники</h2>
+      <p>Телеграм-каналы и RSS-ленты, за которыми стоит следить. Бот проверяет их
+        каждые полторы минуты и забирает всё новое.</p>
+    </section>
+
+    <section class="slide">
+      <div class="art art-filter">
+        <span class="drop d1">реклама</span>
+        <span class="drop d2">дубль</span>
+        <span class="drop d3">оффтоп</span>
+        <span class="funnel"></span>
+        <span class="keep">новость</span>
+      </div>
+      <h2>Мусор не проходит</h2>
+      <p>Рекламу, повторы и оффтоп отсеиваем до того, как вы их увидите. Плюс ваши
+        стоп-слова и фильтр «только популярное».</p>
+    </section>
+
+    <section class="slide">
+      <div class="art art-rewrite">
+        <span class="line l1"></span><span class="line l2"></span><span class="line l3"></span>
+        <span class="spark"><svg class="ic"><use href="#i-bolt"/></svg></span>
+        <span class="line r1"></span><span class="line r2"></span><span class="line r3"></span>
+      </div>
+      <h2>Нейросеть переписывает</h2>
+      <p>Текст становится вашим: свой тон, своя длина, свой язык. Инструкции задаются
+        обычными словами — «начинай со смайлика, не длиннее 180 слов».</p>
+    </section>
+
+    <section class="slide">
+      <div class="art art-check">
+        <span class="doc"></span>
+        <span class="glass"><svg class="ic"><use href="#i-shield"/></svg></span>
+        <span class="tick"><svg class="ic"><use href="#i-check"/></svg></span>
+      </div>
+      <h2>Вторая модель проверяет первую</h2>
+      <p>Отдельная нейросеть сверяет результат с оригиналом и ищет выдуманные цифры,
+        имена и цитаты. Вердикт видно на карточке поста.</p>
+    </section>
+
+    <section class="slide">
+      <div class="art art-schedule">
+        <span class="clock"><span class="hand"></span></span>
+        <span class="pill p1"></span><span class="pill p2"></span><span class="pill p3"></span>
+      </div>
+      <h2>Публикация по расписанию</h2>
+      <p>Окно по часам, равномерный темп, случайная задержка — чтобы канал не выглядел
+        ботом. Или подтверждайте каждый пост кнопкой.</p>
+    </section>
+
+    <section class="slide">
+      <div class="art art-money">
+        <span class="card-a"></span><span class="card-b"></span>
+        <span class="coin"><svg class="ic"><use href="#i-ads"/></svg></span>
+      </div>
+      <h2>Рекламодатели остаются вам</h2>
+      <p>Отсеянную рекламу мы не выбрасываем, а собираем с контактами. Эти компании уже
+        платят за охват в вашей нише — есть с кем работать напрямую.</p>
+    </section>
+  </div>
+
+  <div class="tour-foot">
+    <div class="dots" id="tourDots"></div>
+    <button id="tourNext" class="accent wide">Дальше</button>
+  </div>
+</div>
+
 <main id="app" hidden>
   <header class="head">
     <div class="brand">
@@ -98,8 +175,10 @@
     <div id="postsChart" class="card chart"></div>
     <h3 class="section">Подписчики</h3>
     <div id="subsChart" class="card chart"></div>
-    <h3 class="section">Система</h3>
-    <div id="system" class="card system"></div>
+    <div id="systemBlock" hidden>
+      <h3 class="section">Система</h3>
+      <div id="system" class="card system"></div>
+    </div>
   </section>
 
   <!-- лента -->

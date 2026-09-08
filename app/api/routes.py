@@ -221,9 +221,6 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         (channel_id,),
     )
 
-    memory = psutil.virtual_memory()
-    left_minutes = await gemini.cooldown_left()
-
     return {
         "published": (totals or {}).get("published") or 0,
         "today": (today_row or {}).get("published") or 0,
@@ -243,16 +240,23 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         ],
         "mode": "автопостинг" if channel["autopost"] else "модерация",
         "paused": bool(channel["paused"]),
-        "system": {
-            "cpu": psutil.cpu_percent(interval=None),
-            "ram_used": round(memory.used / 1024**3, 1),
-            "ram_total": round(memory.total / 1024**3, 1),
-            "activity": scheduler.state["activity"],
-            "polling": scheduler.state["polling"],
-            "last_publish_at": await db.get_kv("last_publish_at"),
-            "model_cooldown": left_minutes,
-            "last_error": scheduler.state["last_error"],
-        },
+        # Нагрузка сервера и состояние воркера — внутренняя кухня, клиенту она ни о чём не
+        # говорит и лишний раз выдаёт устройство системы. Показываем только администратору.
+        "system": await _system_health() if is_admin(user) else None,
+    }
+
+
+async def _system_health() -> dict:
+    memory = psutil.virtual_memory()
+    return {
+        "cpu": psutil.cpu_percent(interval=None),
+        "ram_used": round(memory.used / 1024**3, 1),
+        "ram_total": round(memory.total / 1024**3, 1),
+        "activity": scheduler.state["activity"],
+        "polling": scheduler.state["polling"],
+        "last_publish_at": await db.get_kv("last_publish_at"),
+        "model_cooldown": await gemini.cooldown_left(),
+        "last_error": scheduler.state["last_error"],
     }
 
 
@@ -333,9 +337,12 @@ async def publish_now(
     channel_id: int, request: Request, user: dict = Depends(active_user)
 ) -> dict:
     channel = await owned_channel(channel_id, user)
+    # Кнопка «Опубликовать сейчас» намеренно игнорирует паузу канала, окно публикации,
+    # задержку, темп и отложенный дайджест: пользователь нажал её сам и ждёт пост немедленно.
+    # Не игнорируется только дневной лимит — это условие тарифа, а не расписания.
     post = await db.fetch_one(
-        "SELECT * FROM posts WHERE channel_id = ? AND status IN ('approved', 'pending') "
-        "ORDER BY status = 'approved' DESC, id LIMIT 1",
+        "SELECT * FROM posts WHERE channel_id = ? AND status IN ('approved', 'pending', 'digest', 'failed') "
+        "ORDER BY status = 'approved' DESC, status = 'pending' DESC, id LIMIT 1",
         (channel_id,),
     )
     if not post:

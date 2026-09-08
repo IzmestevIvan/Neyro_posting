@@ -39,6 +39,30 @@ async def cooldown_left() -> int:
     return max(0, int(delta.total_seconds() // 60))
 
 
+async def check_models() -> dict[str, str]:
+    """Пингует настроенные модели одним коротким запросом каждую.
+
+    Google снимает модели с публикации, и мёртвое имя выглядит как «нейросеть молчит»:
+    посты копятся, а причина видна только в логе конкретного запроса. Проверка на старте
+    называет проблему сразу.
+    """
+    if not GEMINI_API_KEY:
+        return {}
+    result = {}
+    async with httpx.AsyncClient(timeout=30) as client:
+        for role, model in (
+            ("основная", GEMINI_MODEL_MAIN),
+            ("фактчек", GEMINI_MODEL_VERIFY),
+            ("резервная", GEMINI_MODEL_FALLBACK),
+        ):
+            try:
+                await _call(client, model, GEMINI_API_KEY, "ping", None, 0.0, False)
+                result[role] = f"{model} — ок"
+            except Exception as exc:
+                result[role] = f"{model} — НЕ РАБОТАЕТ: {str(exc)[:130]}"
+    return result
+
+
 def _is_transient(message: str) -> bool:
     """Quota (429) and server errors mean 'try the backup model'; 400/403 mean the key or
     the request is wrong and switching models would fail the same way."""

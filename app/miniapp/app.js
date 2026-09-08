@@ -90,7 +90,9 @@ function renderStats(stats) {
 
   drawChart('#postsChart', stats.posts_chart, false);
   drawChart('#subsChart', stats.subscribers_chart, true);
-  renderSystem(stats.system);
+  // Блок системы приходит только администратору; у остальных его просто нет.
+  $('#systemBlock').hidden = !stats.system;
+  if (stats.system) renderSystem(stats.system);
   setBadge('#feedBadge', stats.pending);
   $('#pendingCount').textContent = stats.pending;
 }
@@ -660,6 +662,58 @@ function enterNormalMode() {
   loadAds().catch(() => {});
 }
 
+/* ---------- приветственный тур ---------- */
+
+const TOUR_KEY = 'neyro:tour_seen';
+
+function tourSeen() {
+  try {
+    return localStorage.getItem(TOUR_KEY) === '1';
+  } catch {
+    return false; // приватный режим — покажем тур, это не страшно
+  }
+}
+
+function closeTour() {
+  try {
+    localStorage.setItem(TOUR_KEY, '1');
+  } catch {
+    /* не смогли запомнить — тур покажется ещё раз, ничего не ломается */
+  }
+  $('#tour').hidden = true;
+}
+
+function setupTour() {
+  const track = $('#tourTrack');
+  const slides = $$('#tourTrack .slide');
+  const dots = $('#tourDots');
+  const next = $('#tourNext');
+  let index = 0;
+
+  dots.innerHTML = slides.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('');
+
+  function show(i) {
+    index = Math.max(0, Math.min(i, slides.length - 1));
+    [...dots.children].forEach((d, n) => d.classList.toggle('on', n === index));
+    next.textContent = index === slides.length - 1 ? 'Начать' : 'Дальше';
+  }
+
+  track.addEventListener('scroll', () => {
+    const at = Math.round(track.scrollLeft / track.clientWidth);
+    if (at !== index) show(at);
+  }, { passive: true });
+
+  next.addEventListener('click', () => {
+    if (index === slides.length - 1) return closeTour();
+    track.scrollTo({ left: (index + 1) * track.clientWidth, behavior: 'smooth' });
+    show(index + 1);
+  });
+
+  $('#tourSkip').addEventListener('click', closeTour);
+  show(0);
+  $('#tour').hidden = false;
+}
+
 /* ---------- start ---------- */
 
 function fillOptions(select, entries) {
@@ -688,6 +742,7 @@ async function start() {
   $('#boot').hidden = true;
   $('#app').hidden = false;
   $('#openAdmin').hidden = !boot.user.is_admin;
+  if (!tourSeen()) setupTour();
 
   setInterval(() => page === 'home' && channel && refreshStats(), 15000);
 

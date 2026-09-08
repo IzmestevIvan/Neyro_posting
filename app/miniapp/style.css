@@ -269,3 +269,125 @@ label.row { cursor: pointer; }
 .toast.err { background: var(--danger); border-color: transparent; color: #fff; }
 
 .empty-note { color: var(--muted); font-size: 14px; text-align: center; padding: 26px 10px; }
+
+/* ============ приветственный тур ============ */
+.tour { position: fixed; inset: 0; z-index: 20; background: var(--bg);
+        display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 0; }
+.tour-skip { position: absolute; top: calc(env(safe-area-inset-top) + 12px); right: 14px; z-index: 2;
+             background: none; color: var(--muted); padding: 8px 12px; font-size: 14px; }
+
+.tour-track { flex: 1; display: flex; overflow-x: auto; overflow-y: hidden;
+              scroll-snap-type: x mandatory; scrollbar-width: none; }
+.tour-track::-webkit-scrollbar { display: none; }
+
+.slide { flex: 0 0 100%; scroll-snap-align: center; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; text-align: center; padding: 60px 30px 20px; }
+.slide h2 { font-size: 24px; margin: 0 0 12px; letter-spacing: -.3px; }
+.slide p { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0; max-width: 340px; }
+
+.tour-foot { padding: 20px 20px calc(env(safe-area-inset-bottom) + 22px); }
+.dots { display: flex; justify-content: center; gap: 7px; margin-bottom: 18px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3);
+          transition: width .25s, background .25s; }
+.dots i.on { width: 22px; border-radius: 4px; background: var(--grad); }
+
+/* --- общая сцена --- */
+.art { position: relative; width: 230px; height: 190px; margin-bottom: 28px; }
+.art span { position: absolute; }
+@media (max-height: 680px) { .art { transform: scale(.82); margin-bottom: 8px; } }
+
+/* 1. источники стекаются в центр */
+.art-sources .core { left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px;
+  border-radius: 20px; background: var(--grad); display: grid; place-items: center; color: #fff;
+  box-shadow: 0 8px 26px rgba(79,141,255,.45); animation: pulse 2.6s ease-in-out infinite; }
+.art-sources .core .ic { width: 30px; height: 30px; }
+.art-sources .node { width: 34px; height: 34px; border-radius: 11px; background: var(--surface-2);
+  border: 1px solid var(--line); }
+.art-sources .n1 { left: 6px; top: 22px; } .art-sources .n2 { left: 0; top: 88px; }
+.art-sources .n3 { left: 24px; top: 150px; }
+.art-sources .beam { left: 46px; width: 66px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent)); transform-origin: left center; }
+.art-sources .b1 { top: 39px; transform: rotate(21deg); animation: flow 2.2s ease-in-out infinite; }
+.art-sources .b2 { top: 104px; transform: rotate(-2deg); animation: flow 2.2s ease-in-out .35s infinite; }
+.art-sources .b3 { top: 166px; transform: rotate(-24deg); animation: flow 2.2s ease-in-out .7s infinite; }
+
+/* 2. воронка отбрасывает мусор */
+.art-filter .funnel { left: 50%; top: 96px; margin-left: -52px; width: 104px; height: 56px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  clip-path: polygon(0 0, 100% 0, 62% 100%, 38% 100%); }
+.art-filter .drop { left: 50%; top: 8px; transform: translateX(-50%); font-size: 12px;
+  color: var(--danger); background: rgba(248,113,113,.12); border-radius: 8px; padding: 4px 10px;
+  white-space: nowrap; }
+.art-filter .d1 { animation: reject 3s ease-in infinite; }
+.art-filter .d2 { animation: reject 3s ease-in 1s infinite; }
+.art-filter .d3 { animation: reject 3s ease-in 2s infinite; }
+.art-filter .keep { left: 50%; bottom: 6px; transform: translateX(-50%); font-size: 12px;
+  color: var(--ok); background: rgba(52,211,153,.14); border-radius: 8px; padding: 5px 12px;
+  white-space: nowrap; animation: rise 3s ease-out .5s infinite; }
+
+/* 3. рерайт: серые строки становятся яркими */
+.art-rewrite .line { height: 8px; border-radius: 4px; }
+.art-rewrite .l1, .art-rewrite .l2, .art-rewrite .l3 { left: 0; background: var(--surface-3); }
+.art-rewrite .l1 { top: 30px; width: 86px; } .art-rewrite .l2 { top: 50px; width: 66px; }
+.art-rewrite .l3 { top: 70px; width: 78px; }
+.art-rewrite .r1, .art-rewrite .r2, .art-rewrite .r3 { right: 0; background: var(--grad);
+  animation: draw 2.6s ease-out infinite; }
+.art-rewrite .r1 { top: 116px; width: 92px; }
+.art-rewrite .r2 { top: 136px; width: 72px; animation-delay: .25s; }
+.art-rewrite .r3 { top: 156px; width: 84px; animation-delay: .5s; }
+.art-rewrite .spark { left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
+  border-radius: 50%; background: var(--grad); display: grid; place-items: center; color: #fff;
+  animation: pulse 2s ease-in-out infinite; }
+
+/* 4. проверка второй моделью */
+.art-check .doc { left: 50%; top: 18px; margin-left: -54px; width: 108px; height: 138px;
+  border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.art-check .glass { left: 118px; top: 76px; width: 62px; height: 62px; border-radius: 50%;
+  background: var(--surface-3); border: 2px solid var(--accent); display: grid; place-items: center;
+  color: var(--accent); animation: sweep 3.4s ease-in-out infinite; }
+.art-check .tick { left: 50%; top: 62px; margin-left: -20px; width: 40px; height: 40px;
+  border-radius: 50%; background: var(--ok); display: grid; place-items: center; color: #04231a;
+  opacity: 0; animation: stamp 3.4s ease-out 1.4s infinite; }
+
+/* 5. расписание */
+.art-schedule .clock { left: 22px; top: 52px; width: 86px; height: 86px; border-radius: 50%;
+  border: 3px solid var(--surface-3); }
+.art-schedule .hand { position: absolute; left: 50%; bottom: 50%; width: 3px; height: 32px;
+  background: var(--accent); border-radius: 2px; transform-origin: bottom center;
+  animation: tick 4s linear infinite; }
+.art-schedule .pill { right: 8px; height: 22px; border-radius: 11px; background: var(--grad);
+  animation: appear 3.6s ease-out infinite; }
+.art-schedule .p1 { top: 46px; width: 78px; }
+.art-schedule .p2 { top: 82px; width: 96px; animation-delay: .8s; }
+.art-schedule .p3 { top: 118px; width: 62px; animation-delay: 1.6s; }
+
+/* 6. рекламодатели */
+.art-money .card-a, .art-money .card-b { left: 50%; border-radius: 14px;
+  background: var(--surface-2); border: 1px solid var(--line); }
+.art-money .card-a { top: 34px; margin-left: -76px; width: 130px; height: 82px;
+  transform: rotate(-8deg); }
+.art-money .card-b { top: 60px; margin-left: -46px; width: 130px; height: 82px;
+  transform: rotate(7deg); animation: float 3s ease-in-out infinite; }
+.art-money .coin { left: 50%; top: 108px; margin-left: -26px; width: 52px; height: 52px;
+  border-radius: 50%; background: var(--grad); display: grid; place-items: center; color: #fff;
+  box-shadow: 0 8px 22px rgba(124,92,255,.45); animation: pulse 2.2s ease-in-out infinite; }
+
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+@keyframes flow { 0% { opacity: .15; } 45% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes draw { 0% { opacity: 0; transform: translateX(14px); } 30%, 100% { opacity: 1; transform: none; } }
+@keyframes reject { 0% { opacity: 0; transform: translate(-50%, 0); }
+  25% { opacity: 1; } 100% { opacity: 0; transform: translate(-160%, 76px) rotate(-24deg); } }
+@keyframes rise { 0%, 55% { opacity: 0; transform: translate(-50%, 12px); }
+  75%, 100% { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes sweep { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-96px); } }
+@keyframes stamp { 0%, 35% { opacity: 0; transform: scale(.4); }
+  50% { opacity: 1; transform: scale(1.15); } 60%, 100% { opacity: 1; transform: scale(1); } }
+@keyframes tick { to { transform: rotate(360deg); } }
+@keyframes appear { 0% { opacity: 0; transform: translateX(20px); }
+  20%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes float { 0%, 100% { transform: rotate(7deg) translateY(0); }
+  50% { transform: rotate(7deg) translateY(-8px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .art * { animation: none !important; }
+}

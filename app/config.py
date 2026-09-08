@@ -18,9 +18,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL_MAIN = os.getenv("GEMINI_MODEL_MAIN", "gemini-2.5-flash").strip()
-GEMINI_MODEL_VERIFY = os.getenv("GEMINI_MODEL_VERIFY", "gemini-2.0-flash").strip()
-GEMINI_MODEL_FALLBACK = os.getenv("GEMINI_MODEL_FALLBACK", "gemini-2.0-flash").strip()
+GEMINI_MODEL_MAIN = os.getenv("GEMINI_MODEL_MAIN", "gemini-3.6-flash").strip()
+GEMINI_MODEL_VERIFY = os.getenv("GEMINI_MODEL_VERIFY", "gemini-3.5-flash").strip()
+GEMINI_MODEL_FALLBACK = os.getenv("GEMINI_MODEL_FALLBACK", "gemini-3.1-flash-lite").strip()
 
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
 HOST = os.getenv("HOST", "0.0.0.0")

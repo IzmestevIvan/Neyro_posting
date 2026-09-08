@@ -23,9 +23,9 @@ VPS на Ubuntu 24.04 (1 vCPU / 2 ГБ), три контейнера в `/opt/ne
 | `BOT_TOKEN` | да | без неё процесс не стартует |
 | `ADMIN_IDS` | да | ID через запятую, доступ к админ-панели |
 | `GEMINI_API_KEY` | де-факто да | общий ключ; без него посты копятся в статусе `new` |
-| `GEMINI_MODEL_MAIN` | нет | основная модель, по умолчанию `gemini-2.5-flash` |
-| `GEMINI_MODEL_VERIFY` | нет | модель фактчека, по умолчанию `gemini-2.0-flash` |
-| `GEMINI_MODEL_FALLBACK` | нет | резерв при квоте или сбое |
+| `GEMINI_MODEL_MAIN` | нет | основная модель, по умолчанию `gemini-3.6-flash` |
+| `GEMINI_MODEL_VERIFY` | нет | модель фактчека, по умолчанию `gemini-3.5-flash` |
+| `GEMINI_MODEL_FALLBACK` | нет | резерв при квоте или сбое, по умолчанию `gemini-3.1-flash-lite` |
 | `POSTGRES_PASSWORD` | да | пароль базы; `docker-compose.yml` собирает из него `DATABASE_URL` |
 | `POSTGRES_USER`, `POSTGRES_DB` | нет | `neyro` / `neyro` |
 | `DATABASE_URL` | локально да | строка подключения; в проде её задаёт compose |
@@ -37,7 +37,32 @@ VPS на Ubuntu 24.04 (1 vCPU / 2 ГБ), три контейнера в `/opt/ne
 | `DEV_AUTH` | **нет** | `1` отключает проверку подписи. Только локально, на проде переменной быть не должно |
 
 Модели вынесены в переменные намеренно: линейка Gemini меняется чаще, чем этот код.
-Смена модели — правка `.env` и `docker compose restart app`, без пересборки.
+Смена модели — правка `.env` и `docker compose up -d app`, без пересборки.
+
+**`docker compose restart` не перечитывает `.env`.** Переменные из `env_file` подставляются
+при создании контейнера, а `restart` перезапускает существующий — со старым окружением.
+Нужен `up -d`: он пересоздаёт контейнер с новыми значениями.
+
+**Модели снимают с публикации.** При старте приложение пингует все три и пишет в лог
+`модель основная: … — ок` либо `— НЕ РАБОТАЕТ: …`. Если посты копятся, а причина неясна,
+это первое, что надо посмотреть:
+
+```bash
+docker compose logs app | grep "модель"
+```
+
+Список доступных моделей для вашего ключа:
+
+```bash
+docker compose exec -T app python -c "
+import json, urllib.request, os
+req = urllib.request.Request('https://generativelanguage.googleapis.com/v1beta/models',
+    headers={'x-goog-api-key': os.environ['GEMINI_API_KEY']})
+for m in json.load(urllib.request.urlopen(req))['models']:
+    if 'generateContent' in m.get('supportedGenerationMethods', []):
+        print(m['name'].replace('models/', ''))
+"
+```
 
 ## Деплой
 
@@ -57,7 +82,7 @@ VPS на Ubuntu 24.04 (1 vCPU / 2 ГБ), три контейнера в `/opt/ne
 cd /opt/neyro
 docker compose logs -f app        # живой лог
 docker compose logs app --tail 50
-docker compose restart app        # после правки .env
+docker compose up -d app          # после правки .env (именно up, не restart)
 docker compose ps                 # состояние и healthcheck
 docker compose down               # остановить всё
 ```
@@ -99,6 +124,12 @@ ssh root@СЕРВЕР "docker compose -f /opt/neyro/docker-compose.yml exec -T d
 
 **Ключ Gemini не задан.** В логе `не задан ключ Gemini`, воркер замолкает на 5 минут и
 пробует снова. Посты не теряются — лежат в статусе `new` до появления ключа.
+
+**Ключ есть, а нейросеть «молчит».** Скорее всего модель сняли с публикации: ответ
+приходит с 404 и текстом «no longer available». Смотрите строки `модель …` в логе старта
+и меняйте имя в `.env`. Отдельная ловушка: Google не обслуживает часть регионов —
+с сервера в Германии всё работает, с локальной машины может отвечать
+`User location is not supported for the API use`.
 
 **Основная модель на паузе.** Ожидаемое поведение при 429. Остаток паузы виден в панели;
 через 30 минут система вернётся на основную модель сама.
