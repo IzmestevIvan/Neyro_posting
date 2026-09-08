@@ -319,6 +319,19 @@ async def digest_due(bot: Bot) -> None:
             await run_digest(bot, channel)
 
 
+async def save_snapshot(channel_id: int, day, subscribers: int, avg_views: int) -> None:
+    """Дневной снимок берётся по максимуму: опросов за сутки много, а провал одного из них
+    (Telegram не ответил) не должен обнулять уже записанное число."""
+    await db.execute(
+        "INSERT INTO stats_daily (channel_id, day, subscribers, avg_views) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (channel_id, day) DO UPDATE SET "
+        # GREATEST, а не MAX: в Postgres MAX существует только как агрегатная функция.
+        "subscribers = GREATEST(excluded.subscribers, stats_daily.subscribers), "
+        "avg_views = GREATEST(excluded.avg_views, stats_daily.avg_views)",
+        (channel_id, day, subscribers, avg_views),
+    )
+
+
 async def refresh_stats(bot: Bot) -> None:
     day = now_utc().date()
     channels = await db.fetch_all("SELECT * FROM channels")
@@ -338,13 +351,7 @@ async def refresh_stats(bot: Bot) -> None:
                 except Exception as exc:
                     log.debug("own channel views failed for %s: %s", channel["id"], exc)
             if subscribers or avg_views:
-                await db.execute(
-                    "INSERT INTO stats_daily (channel_id, day, subscribers, avg_views) VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(channel_id, day) DO UPDATE SET "
-                    "subscribers = MAX(excluded.subscribers, stats_daily.subscribers), "
-                    "avg_views = MAX(excluded.avg_views, stats_daily.avg_views)",
-                    (channel["id"], day, subscribers, avg_views),
-                )
+                await save_snapshot(channel["id"], day, subscribers, avg_views)
 
 
 async def prune_posts() -> None:

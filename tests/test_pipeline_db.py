@@ -148,3 +148,51 @@ async def test_long_post_is_sent_within_telegram_limit(store, channel):
     post = await make_post(store, channel, text="Я" * 6000)
     await publisher.publish_post(bot, post, channel)
     assert len(bot.sent[0]["text"]) <= publisher.TEXT_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_daily_snapshot_keeps_the_highest_value(store, channel):
+    """Постгрес не знает скалярного MAX(a, b) — этот апсерт падал на проде с
+    UndefinedFunctionError, потому что был написан на диалекте SQLite."""
+    day = store.utcnow().date()
+    await scheduler.save_snapshot(channel["id"], day, 340, 1700)
+    await scheduler.save_snapshot(channel["id"], day, 310, 1500)
+
+    row = await store.fetch_one(
+        "SELECT subscribers, avg_views FROM stats_daily WHERE channel_id = ? AND day = ?",
+        (channel["id"], day),
+    )
+    assert row["subscribers"] == 340, "просадка за день не должна затирать максимум"
+    assert row["avg_views"] == 1700
+
+
+@pytest.mark.asyncio
+async def test_daily_snapshot_grows_when_value_rises(store, channel):
+    day = store.utcnow().date()
+    await scheduler.save_snapshot(channel["id"], day, 100, 500)
+    await scheduler.save_snapshot(channel["id"], day, 420, 900)
+
+    row = await store.fetch_one(
+        "SELECT subscribers, avg_views FROM stats_daily WHERE channel_id = ? AND day = ?",
+        (channel["id"], day),
+    )
+    assert (row["subscribers"], row["avg_views"]) == (420, 900)
+
+
+@pytest.mark.asyncio
+async def test_pruning_runs_only_once_a_day(store, channel):
+    """Защита от повторов сравнивает значение из kv с датой. Если типы разойдутся
+    (строка против date), сравнение всегда ложно и уборка пойдёт на каждом круге."""
+    from datetime import timedelta
+
+    await scheduler.prune_posts()
+    await store.execute(
+        "INSERT INTO posts (channel_id, uid, raw_text, media, status, created_at) "
+        "VALUES (?, 'stale', 'x', '[]', 'filtered', ?)",
+        (channel["id"], store.utcnow() - timedelta(days=30)),
+    )
+
+    await scheduler.prune_posts()
+
+    left = await store.fetch_all("SELECT uid FROM posts WHERE channel_id = ?", (channel["id"],))
+    assert [r["uid"] for r in left] == ["stale"], "второй вызов за сутки должен ничего не делать"
