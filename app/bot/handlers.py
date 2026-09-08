@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 import httpx
-from aiogram import Bot, F, Router
+from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     CallbackQuery,
@@ -20,12 +20,29 @@ from app.ai import gemini, pipeline
 from app.bot.cards import card_text, moderation_keyboard
 from app.api.auth import has_access
 from app.config import ADMIN_IDS, LOGO_DIR, PUBLIC_URL
-from app.core import publisher
+from app.core import access, publisher
 from app.sources import telegram_web, web
 
 log = logging.getLogger("bot")
 esc_html = html.escape
 router = Router()
+
+
+class AccessMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        text = (getattr(event, "text", None) or "").split()
+        command = text[0].split("@", 1)[0] if text else ""
+        if isinstance(event, Message) and command in ("/start", "/id", "/help"):
+            return await handler(event, data)
+        user = getattr(event, "from_user", None)
+        if not user or not await access.owner_has_access(user.id):
+            await event.answer("Доступ закрыт или истёк. Откройте панель для активации промокода.")
+            return
+        return await handler(event, data)
+
+
+router.message.outer_middleware(AccessMiddleware())
+router.callback_query.outer_middleware(AccessMiddleware())
 
 URL_RE = re.compile(r"(?:https?://|(?:www\.)?t\.me/)\S+", re.I)
 LOGO_WORDS = ("логотип", "logo", "вотермарк", "водяной знак")
@@ -271,7 +288,11 @@ async def on_edit_reply(message: Message, bot: Bot) -> None:
     except gemini.AIError as exc:
         return await message.reply(f"Нейросеть недоступна: {exc}")
 
-    await db.execute("UPDATE posts SET text_out = ? WHERE id = ?", (updated, post["id"]))
+    check = await pipeline._factcheck(post["raw_text"], updated, channel["gemini_key"] or None)
+    if not check or check["ok"] is not True:
+        return await message.reply("Правка не прошла проверку фактов. Предыдущий текст сохранён.")
+    if not await publisher.replace_draft(post, updated, check):
+        return await message.reply("Пост уже изменён или опубликован. Обновите ленту.")
     post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post["id"],))
     await bot.edit_message_text(
         chat_id=message.chat.id,
@@ -298,11 +319,16 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
     channel = await db.fetch_one("SELECT * FROM channels WHERE id = ?", (post["channel_id"],))
 
     if action == "reject":
-        await db.execute("UPDATE posts SET status = 'rejected' WHERE id = ?", (post_id,))
+        if not await publisher.reject_post(post_id):
+            return await callback.answer("Статус поста изменился", show_alert=True)
         await callback.message.edit_text("❌ Отклонено")
         return await callback.answer()
 
+    if action not in ("approve", "regen", "reject"):
+        return await callback.answer("Неизвестное действие", show_alert=True)
     if action == "regen":
+        if post["status"] not in publisher.CLAIMABLE:
+            return await callback.answer("Пост недоступен для редактирования", show_alert=True)
         await callback.answer("Переписываю…")
         try:
             result = await pipeline.process(
@@ -317,7 +343,8 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
             return await callback.message.answer(f"Нейросеть недоступна: {exc}")
         if not result.ok:
             return await callback.message.answer(f"Не прошло проверку: {result.reason}")
-        await db.execute("UPDATE posts SET text_out = ? WHERE id = ?", (result.text, post_id))
+        if not await publisher.replace_draft(post, result.text, result.fact_check):
+            return await callback.message.answer("Пост уже изменён или опубликован. Обновите ленту.")
         post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post_id,))
         return await callback.message.edit_text(
             card_text(post, channel),

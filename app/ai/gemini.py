@@ -97,7 +97,7 @@ async def _call(
 
     resp = await client.post(
         API.format(model=model),
-        params={"key": api_key},
+        headers={"x-goog-api-key": api_key},
         json=body,
         timeout=90,
     )
@@ -142,7 +142,7 @@ async def generate(
         for attempt, name in enumerate(chain):
             try:
                 return await _call(client, name, key, prompt, system, temperature, as_json)
-            except AIError as exc:
+            except (AIError, httpx.RequestError) as exc:
                 errors.append(str(exc))
                 log.warning("gemini call failed: %s", exc)
                 if name == primary and _is_transient(str(exc)):

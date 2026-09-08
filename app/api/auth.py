@@ -67,6 +67,8 @@ def is_admin(user: dict) -> bool:
 
 def has_access(user: dict) -> bool:
     """Panel is invite-only: access comes from redeeming a promo code, admins always in."""
+    if user.get("blocked"):
+        return False
     if is_admin(user):
         return True
     until = user.get("access_until")

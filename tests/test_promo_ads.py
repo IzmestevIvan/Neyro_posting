@@ -48,11 +48,12 @@ async def test_code_cannot_be_used_by_a_second_person(store, owner):
 
 
 @pytest.mark.asyncio
-async def test_reentering_own_code_extends_instead_of_resetting(store, owner):
+async def test_reentering_own_code_is_idempotent(store, owner):
     (code,) = await promo.create_codes(1, plan="start")
     first = await promo.redeem(code, owner)
     second = await promo.redeem(code, owner)
-    assert second["access_until"] > first["access_until"]
+    assert second["access_until"] == first["access_until"]
+    assert second["already_redeemed"] is True
 
 
 @pytest.mark.asyncio

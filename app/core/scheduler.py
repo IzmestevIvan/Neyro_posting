@@ -12,7 +12,7 @@ from aiogram import Bot
 from app import db
 from app.ai import gemini, pipeline
 from app.config import DELAY_MODES, PACE_MODES, POLL_INTERVAL
-from app.core import adbook, publisher
+from app.core import access, adbook, publisher
 from app.core.filters import find_duplicate, fingerprint, stopword_hit
 from app.sources import rss, telegram_web
 
@@ -83,11 +83,11 @@ async def _plan_publish_at(channel: dict) -> datetime:
     return local.astimezone(timezone.utc)
 
 
-async def _known_fingerprints(channel_id: int) -> list[tuple[int, str]]:
+async def _known_fingerprints(channel_id: int, exclude_id: int) -> list[tuple[int, str]]:
     rows = await db.fetch_all(
-        "SELECT id, fingerprint FROM posts WHERE channel_id = ? AND fingerprint IS NOT NULL "
+        "SELECT id, fingerprint FROM posts WHERE channel_id = ? AND id != ? AND fingerprint IS NOT NULL "
         "ORDER BY id DESC LIMIT ?",
-        (channel_id, DUP_WINDOW),
+        (channel_id, exclude_id, DUP_WINDOW),
     )
     return [(r["id"], r["fingerprint"]) for r in rows]
 
@@ -112,40 +112,41 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
         median = telegram_web.median_views(items)
 
     fresh = _pick_new(items, source["last_uid"])
-    if items:
-        await db.execute(
-            "UPDATE sources SET last_uid = ?, checked_at = ?, error = NULL, "
-            "title = COALESCE(title, ?), median_views = ? WHERE id = ?",
-            (items[-1].uid, db.utcnow(), title, median or source["median_views"], source["id"]),
-        )
-
     created = 0
-    for item in fresh:
-        exists = await db.fetch_one(
-            "SELECT id FROM posts WHERE channel_id = ? AND uid = ?", (channel["id"], item.uid)
-        )
-        if exists:
-            continue
-        await db.execute(
-            "INSERT INTO posts (channel_id, source_id, uid, url, source_title, raw_text, media, "
-            "views, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
-            (
-                channel["id"],
-                source["id"],
-                item.uid,
-                item.url,
-                item.source_title or source["title"],
-                item.text,
-                json.dumps(item.media, ensure_ascii=False),
-                item.views,
-                db.utcnow(),
-            ),
-        )
-        created += 1
+    pool = await db.connect()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Serialize concurrent readers of this source; commit cursor and rows together.
+            locked = await conn.fetchrow("SELECT last_uid FROM sources WHERE id=$1 FOR UPDATE", source["id"])
+            if not locked or locked["last_uid"] != source["last_uid"]:
+                return 0  # A newer poll has committed; never rewind its cursor.
+            for item in fresh:
+                exists = await conn.fetchval(
+                    "SELECT id FROM posts WHERE channel_id=$1 AND uid=$2", channel["id"], item.uid
+                )
+                if exists:
+                    continue
+                await conn.execute(
+                    "INSERT INTO posts (channel_id, source_id, uid, url, source_title, raw_text, media, "
+                    "views, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'new',$9)",
+                    channel["id"], source["id"], item.uid, item.url,
+                    item.source_title or source["title"], item.text,
+                    json.dumps(item.media, ensure_ascii=False), item.views, db.utcnow(),
+                )
+                created += 1
+            if items:
+                await conn.execute(
+                    "UPDATE sources SET last_uid=$1, checked_at=$2, error=NULL, "
+                    "title=COALESCE(title,$3), median_views=$4 WHERE id=$5",
+                    items[-1].uid, db.utcnow(), title, median or source["median_views"], source["id"],
+                )
+
     return created
 
 
 async def poll_channel(client: httpx.AsyncClient, channel: dict) -> None:
+    if not await access.owner_has_access(channel["owner_id"]):
+        return
     sources = await db.fetch_all(
         "SELECT * FROM sources WHERE channel_id = ? AND enabled = 1", (channel["id"],)
     )
@@ -171,6 +172,8 @@ async def _reject(post: dict, status: str, reason: str, stat_field: str) -> None
 
 
 async def process_post(bot: Bot, post: dict, channel: dict) -> None:
+    if not await access.owner_has_access(channel["owner_id"]):
+        return
     media = json.loads(post["media"] or "[]")
     day = now_utc().date()
 
@@ -188,7 +191,7 @@ async def process_post(bot: Bot, post: dict, channel: dict) -> None:
             return await _reject(post, "filtered", f"ниже медианы источника ({post['views']}<{median})", "filtered")
 
     prints = fingerprint(post["raw_text"] or "")
-    duplicate_of = find_duplicate(prints, await _known_fingerprints(channel["id"]))
+    duplicate_of = find_duplicate(prints, await _known_fingerprints(channel["id"], post["id"]))
     await db.execute("UPDATE posts SET fingerprint = ? WHERE id = ?", (prints, post["id"]))
     if duplicate_of:
         return await _reject(post, "duplicate", f"дубль поста #{duplicate_of}", "duplicates")
@@ -276,6 +279,11 @@ async def publish_due(bot: Bot) -> None:
 
 
 async def run_digest(bot: Bot, channel: dict) -> None:
+    if not await access.owner_has_access(channel["owner_id"]):
+        return
+    # Until digest moderation is implemented, never auto-send in manual mode.
+    if not channel["autopost"] or await publisher.quota_left(channel["owner_id"]) <= 0:
+        return
     rows = await db.fetch_all(
         "SELECT * FROM posts WHERE channel_id = ? AND status = 'digest' ORDER BY id", (channel["id"],)
     )
@@ -290,6 +298,8 @@ async def run_digest(bot: Bot, channel: dict) -> None:
         log.warning("digest failed: %s", exc)
         return
 
+    if not await access.owner_has_access(channel["owner_id"]):
+        return
     message = await publisher.publish(bot, channel, summary, [])
     now = now_utc()
     ids = [r["id"] for r in rows]

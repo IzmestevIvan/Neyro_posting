@@ -55,6 +55,8 @@ async def process(
                 temperature=0.2,
             )
             calls += 1
+            if any(type(triage.get(key)) is not bool for key in ("is_ad", "is_offtopic", "is_newsworthy")):
+                raise gemini.AIError("некорректная структура триажа")
             if triage.get("is_ad"):
                 return Result(
                     False,
@@ -71,7 +73,7 @@ async def process(
         except gemini.NoKeyError:
             raise
         except gemini.AIError as exc:
-            log.warning("triage failed, continuing: %s", exc)
+            return Result(False, reason="триаж недоступен — публикация заблокирована", ai_requests=calls)
 
     deep = quality == "super"
     rewritten = await gemini.generate(
@@ -91,9 +93,9 @@ async def process(
     check = await _factcheck(text, rewritten, api_key)
     calls += 1
     if check is None:
-        return Result(True, text=rewritten, ai_requests=calls, warnings=["фактчек недоступен"])
+        return Result(False, reason="фактчек недоступен — публикация заблокирована", ai_requests=calls, warnings=["фактчек недоступен"])
 
-    if not check.get("ok", True):
+    if check["ok"] is not True:
         retry = await gemini.generate(
             prompts.rewrite_prompt(
                 text,
@@ -124,7 +126,7 @@ async def process(
 
 async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> Optional[dict]:
     try:
-        return await gemini.generate_json(
+        check = await gemini.generate_json(
             prompts.factcheck_prompt(original, rewritten),
             api_key=api_key,
             system=prompts.FACTCHECK_SYSTEM,
@@ -132,6 +134,15 @@ async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> O
             temperature=0.1,
             allow_fallback=False,
         )
+        if (type(check.get("ok")) is not bool
+                or not isinstance(check.get("hallucinations"), list)
+                or not isinstance(check.get("distortions"), list)
+                or not all(isinstance(x, str) for x in check["hallucinations"] + check["distortions"])
+                or not isinstance(check.get("verdict"), str)):
+            raise gemini.AIError("некорректная структура фактчека")
+        if check["ok"] and (check["hallucinations"] or check["distortions"]):
+            raise gemini.AIError("противоречивый результат фактчека")
+        return check
     except gemini.AIError as exc:
         log.warning("factcheck failed: %s", exc)
         return None

@@ -135,6 +135,13 @@ async def add_channel(
     except Exception as exc:
         raise HTTPException(400, f"бот не видит канал: добавьте его администратором. {exc}") from exc
 
+    try:
+        await publisher.verify_channel_permissions(bot, chat_id, user["tg_id"])
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, "не удалось проверить права на канал; повторите позже") from exc
+
     existing = await db.fetch_one(
         "SELECT id FROM channels WHERE owner_id = ? AND chat_id = ?", (user["tg_id"], chat_id)
     )
@@ -296,10 +303,13 @@ async def post_action(
     bot = request.app.state.bot
 
     if action == "reject":
-        await db.execute("UPDATE posts SET status = 'rejected' WHERE id = ?", (post_id,))
+        if not await publisher.reject_post(post_id):
+            raise HTTPException(409, "статус поста изменился; обновите ленту")
         return {"ok": True}
 
     if action == "regen":
+        if post["status"] not in publisher.CLAIMABLE:
+            raise HTTPException(409, "пост недоступен для редактирования")
         from app.ai import pipeline
 
         try:
@@ -315,7 +325,8 @@ async def post_action(
             raise HTTPException(502, str(exc)) from exc
         if not result.ok:
             raise HTTPException(400, result.reason or "не прошло проверку")
-        await db.execute("UPDATE posts SET text_out = ? WHERE id = ?", (result.text, post_id))
+        if not await publisher.replace_draft(post, result.text, result.fact_check):
+            raise HTTPException(409, "пост уже изменён или опубликован; обновите ленту")
         return {"ok": True, "text": result.text}
 
     if action == "approve":
@@ -342,6 +353,7 @@ async def publish_now(
     # Не игнорируется только дневной лимит — это условие тарифа, а не расписания.
     post = await db.fetch_one(
         "SELECT * FROM posts WHERE channel_id = ? AND status IN ('approved', 'pending', 'digest', 'failed') "
+        "AND NULLIF(trim(text_out), '') IS NOT NULL "
         "ORDER BY status = 'approved' DESC, status = 'pending' DESC, id LIMIT 1",
         (channel_id,),
     )

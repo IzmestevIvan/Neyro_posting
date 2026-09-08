@@ -14,7 +14,7 @@ from aiogram.types import (
 )
 
 from app import db
-from app.core import watermark
+from app.core import access, watermark
 
 log = logging.getLogger("publisher")
 
@@ -131,24 +131,27 @@ class AlreadyPublished(RuntimeError):
     pass
 
 
-CLAIMABLE = ("new", "pending", "approved", "digest", "failed")
+CLAIMABLE = ("pending", "approved", "digest", "failed")
 MAX_ATTEMPTS = 3
 
 
 async def publish_post(bot: Bot, post: dict, channel: dict) -> int:
-    # Claim the row first: the panel and the bot card can both approve the same post, and
-    # every send below is an await during which the other caller would slip through.
-    claimed = await db.update(
-        "UPDATE posts SET status = 'publishing' WHERE id = ? AND status IN "
-        f"({','.join('?' * len(CLAIMABLE))})",
-        (post["id"], *CLAIMABLE),
-    )
-    if not claimed:
-        raise AlreadyPublished("пост уже опубликован или публикуется прямо сейчас")
+    if not await access.owner_has_access(channel["owner_id"]):
+        raise PermissionError("доступ владельца закрыт")
+    pool = await db.connect()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            fresh = await conn.fetchrow("SELECT * FROM posts WHERE id=$1 FOR UPDATE", post["id"])
+            if not fresh or fresh["channel_id"] != channel["id"] or fresh["status"] not in CLAIMABLE:
+                raise AlreadyPublished("пост недоступен для публикации или уже отправляется")
+            if not (fresh["text_out"] or "").strip():
+                raise AlreadyPublished("нет готового текста — повторите обработку")
+            post = dict(fresh)
+            await conn.execute("UPDATE posts SET status='publishing' WHERE id=$1", post["id"])
 
-    media = json.loads(post.get("media") or "[]")
     try:
-        message = await publish(bot, channel, post["text_out"] or post["raw_text"], media)
+        media = json.loads(post.get("media") or "[]")
+        message = await publish(bot, channel, post["text_out"], media)
     except Exception as exc:
         await db.execute(
             "UPDATE posts SET attempts = attempts + 1, reason = ?, "
@@ -189,3 +192,31 @@ async def quota_left(owner_id: int) -> int:
 async def resolve_channel(bot: Bot, ref: str) -> tuple[int, str, Optional[str]]:
     chat = await bot.get_chat(ref)
     return chat.id, chat.title or ref, chat.username
+
+
+async def verify_channel_permissions(bot: Bot, chat_id: int, user_id: int) -> None:
+    """A public channel being visible does not authorize its management."""
+    member = await bot.get_chat_member(chat_id, user_id)
+    if member.status not in ("creator", "administrator"):
+        raise PermissionError("подключать канал может только его владелец или администратор")
+    me = await bot.get_me()
+    bot_member = await bot.get_chat_member(chat_id, me.id)
+    if bot_member.status != "administrator" or not bot_member.can_post_messages:
+        raise PermissionError("боту нужны права администратора с разрешением публикации")
+
+
+async def reject_post(post_id: int) -> bool:
+    return bool(await db.update(
+        "UPDATE posts SET status='rejected' WHERE id=? AND status IN ('new','pending','approved','digest','failed')",
+        (post_id,),
+    ))
+
+
+async def replace_draft(post: dict, text: str, fact_check) -> bool:
+    """Optimistic version check: never modify a sent post or overwrite a newer edit."""
+    return bool(await db.update(
+        "UPDATE posts SET text_out=?, fact_check=? WHERE id=? "
+        "AND status IN ('pending','approved','digest','failed') "
+        "AND text_out IS NOT DISTINCT FROM ?",
+        (text, json.dumps(fact_check, ensure_ascii=False) if fact_check else None, post['id'], post['text_out']),
+    ))

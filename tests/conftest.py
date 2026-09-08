@@ -3,7 +3,9 @@ import os
 import pytest
 import pytest_asyncio
 
-TEST_URL = os.getenv("TEST_DATABASE_URL", "postgresql://neyro:neyro@localhost:5432/neyro_test")
+from tests.db_safety import validate_test_url
+
+TEST_URL = validate_test_url(os.getenv("TEST_DATABASE_URL", "postgresql://neyro:neyro@localhost:5432/neyro_test"))
 os.environ["DATABASE_URL"] = TEST_URL
 
 TABLES = ("posts", "ad_offers", "sources", "stats_daily", "channels", "promo_codes", "users", "kv")
@@ -19,14 +21,16 @@ async def store():
     pool = await db.connect()
     async with pool.acquire() as conn:
         await conn.execute(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
-    yield db
-    await db.close()
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 @pytest_asyncio.fixture
 async def owner(store):
     await store.execute(
-        "INSERT INTO users (tg_id, daily_limit, max_channels, created_at) VALUES (1, 3, 5, ?)",
+        "INSERT INTO users (tg_id, daily_limit, max_channels, access_until, created_at) VALUES (1, 3, 5, now() + interval '30 days', ?)",
         (store.utcnow(),),
     )
     return 1
