@@ -749,45 +749,69 @@ function tourSeen() {
   }
 }
 
+let tourReturnFocus = null;
+
 function closeTour() {
-  try {
-    localStorage.setItem(TOUR_KEY, '1');
-  } catch {
-    /* не смогли запомнить — тур покажется ещё раз, ничего не ломается */
-  }
+  try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* Storage may be unavailable. */ }
   $('#tour').hidden = true;
+  $('#app').inert = false;
+  document.body.classList.remove('tour-open');
+  if (tourReturnFocus?.isConnected && tourReturnFocus !== document.body) tourReturnFocus.focus();
 }
 
 function setupTour() {
+  const tour = $('#tour');
   const track = $('#tourTrack');
   const slides = $$('#tourTrack .slide');
   const dots = $('#tourDots');
   const next = $('#tourNext');
+  const prev = $('#tourPrev');
+  tourReturnFocus = document.activeElement;
   let index = 0;
-
-  dots.innerHTML = slides.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('');
+  let touch = null;
+  dots.innerHTML = slides.map((slide, i) => `<button aria-label="Слайд ${i + 1}: ${esc(slide.querySelector('h2').textContent)}" data-slide="${i}"><span></span></button>`).join('');
 
   function show(i) {
     index = Math.max(0, Math.min(i, slides.length - 1));
-    [...dots.children].forEach((d, n) => d.classList.toggle('on', n === index));
-    next.textContent = index === slides.length - 1 ? 'Начать' : 'Дальше';
+    slides.forEach((slide, n) => { slide.hidden = n !== index; });
+    [...dots.children].forEach((dot, n) => { dot.classList.toggle('on', n === index); dot.setAttribute('aria-pressed', String(n === index)); });
+    tour.setAttribute('aria-labelledby', slides[index].querySelector('h2').id);
+    $('#tourCounter').textContent = `${String(index + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
+    prev.disabled = index === 0;
+    next.innerHTML = index === slides.length - 1 ? `В редакцию ${icon('check')}` : `Дальше ${icon('back')}`;
+    track.scrollTop = 0;
   }
 
-  track.onscroll = () => {
-    const at = Math.round(track.scrollLeft / track.clientWidth);
-    if (at !== index) show(at);
-  };
-
-  next.onclick = () => {
-    if (index === slides.length - 1) return closeTour();
-    track.scrollTo({ left: (index + 1) * track.clientWidth, behavior: 'smooth' });
-    show(index + 1);
-  };
-
+  next.onclick = () => index === slides.length - 1 ? closeTour() : show(index + 1);
+  prev.onclick = () => show(index - 1);
+  dots.onclick = event => { const dot = event.target.closest('[data-slide]'); if (dot) show(Number(dot.dataset.slide)); };
   $('#tourSkip').onclick = closeTour;
-  $('#tour').hidden = false;
-  track.scrollTo({ left: 0, behavior: 'instant' });
+  document.onkeydown = event => {
+    if (tour.hidden) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeTour(); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); show(index + 1); }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); show(index - 1); }
+    if (event.key === 'Tab') {
+      const buttons = [...tour.querySelectorAll('button:not(:disabled)')];
+      const first = buttons[0], last = buttons[buttons.length - 1];
+      if (!tour.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  };
+  track.onpointerdown = event => { touch = { x:event.clientX, y:event.clientY, id:event.pointerId }; };
+  track.onpointercancel = () => { touch = null; };
+  track.onpointerup = event => {
+    if (!touch || touch.id !== event.pointerId) return;
+    const dx = event.clientX - touch.x, dy = event.clientY - touch.y;
+    touch = null;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) show(index + (dx < 0 ? 1 : -1));
+  };
+  tour.hidden = false;
+  $('#app').inert = true;
+  document.body.classList.add('tour-open');
   show(0);
+  $('#tourSkip').focus();
 }
 
 $('#replayTour').addEventListener('click', setupTour);

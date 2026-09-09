@@ -32,79 +32,74 @@
 
 <div id="boot" class="boot"><span class="spinner"></span></div>
 
-<div id="tour" class="tour" hidden>
-  <button id="tourSkip" class="tour-skip">Пропустить</button>
-
-  <div class="tour-track" id="tourTrack">
-    <section class="slide">
-      <div class="art art-sources">
-        <span class="node n1"></span><span class="node n2"></span><span class="node n3"></span>
-        <span class="core"><svg class="ic"><use href="#i-sources"/></svg></span>
-        <span class="beam b1"></span><span class="beam b2"></span><span class="beam b3"></span>
-      </div>
-      <h2>Вы выбираете источники</h2>
-      <p>Телеграм-каналы и RSS-ленты, за которыми стоит следить. Бот проверяет их
-        регулярно и готовит новые материалы.</p>
-    </section>
-
-    <section class="slide">
-      <div class="art art-filter">
-        <span class="drop d1">реклама</span>
-        <span class="drop d2">дубль</span>
-        <span class="drop d3">оффтоп</span>
-        <span class="funnel"></span>
-        <span class="keep">новость</span>
-      </div>
-      <h2>Меньше ручной сортировки</h2>
-      <p>Рекламу, повторы и оффтоп отсеиваем до того, как вы их увидите. Плюс ваши
-        стоп-слова и фильтр «только популярное».</p>
-    </section>
-
-    <section class="slide">
-      <div class="art art-rewrite">
-        <span class="line l1"></span><span class="line l2"></span><span class="line l3"></span>
-        <span class="spark"><svg class="ic"><use href="#i-bolt"/></svg></span>
-        <span class="line r1"></span><span class="line r2"></span><span class="line r3"></span>
-      </div>
-      <h2>Нейросеть переписывает</h2>
-      <p>Текст становится вашим: свой тон, своя длина, свой язык. Инструкции задаются
-        обычными словами — «начинай со смайлика, не длиннее 180 слов».</p>
-    </section>
-
-    <section class="slide">
-      <div class="art art-check">
-        <span class="doc"></span>
-        <span class="glass"><svg class="ic"><use href="#i-shield"/></svg></span>
-        <span class="tick"><svg class="ic"><use href="#i-check"/></svg></span>
-      </div>
-      <h2>Вторая модель проверяет первую</h2>
-      <p>В режиме «Суперпостинг» отдельная проверка сверяет результат с оригиналом и ищет выдуманные цифры,
-        имена и цитаты. Вердикт видно на карточке поста.</p>
-    </section>
-
-    <section class="slide">
-      <div class="art art-schedule">
-        <span class="clock"><span class="hand"></span></span>
-        <span class="pill p1"></span><span class="pill p2"></span><span class="pill p3"></span>
-      </div>
-      <h2>Публикация по расписанию</h2>
-      <p>Окно по часам, равномерный темп, случайная задержка — чтобы канал не выглядел
-        ботом. Или подтверждайте каждый пост кнопкой.</p>
-    </section>
-
-    <section class="slide">
-      <div class="art art-money">
-        <span class="card-a"></span><span class="card-b"></span>
-        <span class="coin"><svg class="ic"><use href="#i-ads"/></svg></span>
-      </div>
-      <h2>Рекламодатели остаются вам</h2>
-      <p>Отсеянную рекламу мы не выбрасываем, а собираем с контактами. Проверьте причину определения и контакты. Ошибочную запись можно отметить кнопкой «Это не реклама».</p>
-    </section>
-  </div>
-
-  <div class="tour-foot">
-    <div class="dots" id="tourDots"></div>
-    <button id="tourNext" class="accent wide">Дальше</button>
+<div id="tour" class="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle1" hidden>
+  <div class="tour-shell">
+    <header class="tour-head">
+      <span class="tour-brand"><span class="mark" aria-hidden="true"></span> Знакомство с редакцией</span>
+      <button id="tourSkip" class="tour-skip">Пропустить <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="tour-track" id="tourTrack">
+      <section class="slide">
+        <div class="tour-visual scene-sources" aria-hidden="true">
+          <div class="demo-label">ВАШИ ИСТОЧНИКИ</div>
+          <div class="demo-source"><span class="demo-icon">TG</span><span><b>Новости города</b><small>Telegram-канал</small></span><span class="demo-dot"></span></div>
+          <div class="demo-source"><span class="demo-icon rss">RSS</span><span><b>Редакционный журнал</b><small>Лента публикаций</small></span><span class="demo-dot"></span></div>
+          <div class="demo-flow">↓</div>
+          <div class="demo-result"><svg class="ic"><use href="#i-inbox"/></svg> Материалы для вашего канала</div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">01 · ИСТОЧНИКИ</span><h2 id="tourTitle1">Хороший пост начинается с источника</h2><p>Добавьте Telegram-каналы или RSS-ленты. Бот будет собирать новые материалы для вашей редакции.</p><div class="tour-tip">Начните с 2–3 источников по теме канала.</div></div>
+      </section>
+      <section class="slide" hidden>
+        <div class="tour-visual scene-filter" aria-hidden="true">
+          <div class="demo-label">ПЕРВЫЙ ОТБОР</div>
+          <div class="demo-filter"><span>Новая станция метро</span><b class="demo-good">Новость</b></div>
+          <div class="demo-filter"><span>Повтор вчерашнего поста</span><b>Дубль</b></div>
+          <div class="demo-filter"><span>Предложение со скидкой</span><b class="demo-amber">Проверить</b></div>
+          <div class="demo-footnote"><svg class="ic"><use href="#i-shield"/></svg> Спорные материалы — на одобрение</div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">02 · ОТБОР</span><h2 id="tourTitle2">Меньше лишнего. Больше по теме.</h2><p>Фильтры ищут дубли, рекламу и оффтоп. Добавьте стоп-слова, чтобы точнее настроить отбор.</p><div class="tour-tip">Фильтр может ошибиться. Причину решения можно посмотреть в панели.</div></div>
+      </section>
+      <section class="slide" hidden>
+        <div class="tour-visual scene-style" aria-hidden="true">
+          <div class="demo-label">ВАШИ ИНСТРУКЦИИ</div>
+          <div class="demo-prompt">«Коротко и по делу.<br>Спокойный тон, без канцелярита»</div>
+          <div class="demo-paper"><small>ЧЕРНОВИК</small><b>В городе появится новый парк</b><span>Зелёная зона с прогулочными дорожками откроется осенью.</span><div class="demo-lines"><i></i><i></i></div></div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">03 · ВАШ СТИЛЬ</span><h2 id="tourTitle3">Объясните стиль своими словами</h2><p>Задайте тон, длину и язык постов. Нейросеть перепишет материал по вашим инструкциям.</p><div class="tour-tip">Свои тексты и ссылки можно отправлять прямо в чат с ботом.</div></div>
+      </section>
+      <section class="slide" hidden>
+        <div class="tour-visual scene-facts" aria-hidden="true">
+          <div class="demo-label">СВЕРКА С ОРИГИНАЛОМ</div>
+          <div class="demo-verify"><svg class="ic"><use href="#i-shield"/></svg><b>Проверка фактов</b><small>Режим «Суперпостинг»</small></div>
+          <div class="demo-check"><span>Имена и названия</span><svg class="ic"><use href="#i-check"/></svg></div>
+          <div class="demo-check"><span>Числа и даты</span><svg class="ic"><use href="#i-check"/></svg></div>
+          <div class="demo-check"><span>Цитаты и смысл</span><svg class="ic"><use href="#i-check"/></svg></div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">04 · ПРОВЕРКА</span><h2 id="tourTitle4">Ещё один взгляд перед публикацией</h2><p>В «Суперпостинге» отдельная проверка сравнивает черновик с исходником: ищет выдумки и искажения.</p><div class="tour-tip">Вердикт виден на карточке. Важные факты всё равно стоит проверить самому.</div></div>
+      </section>
+      <section class="slide" hidden>
+        <div class="tour-visual scene-plan" aria-hidden="true">
+          <div class="demo-label">РИТМ ВАШЕГО КАНАЛА</div>
+          <div class="demo-slot"><span>09:00</span><b>Утренние новости</b><span class="demo-dot"></span></div>
+          <div class="demo-slot"><span>14:00</span><b>Главное за день</b><span class="demo-dot"></span></div>
+          <div class="demo-slot"><span>19:00</span><b>Вечерний материал</b><span class="demo-dot"></span></div>
+          <div class="demo-result"><svg class="ic"><use href="#i-check"/></svg> Автоматически или с вашим одобрением</div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">05 · ПУБЛИКАЦИЯ</span><h2 id="tourTitle5">Вы решаете, когда пост выйдет</h2><p>Настройте часы и темп автопостинга. Или оставьте ручной режим, чтобы одобрять каждый готовый пост.</p><div class="tour-tip">«Опубликовать сейчас» отправляет пост сразу. Дневной лимит сохраняется.</div></div>
+      </section>
+      <section class="slide" hidden>
+        <div class="tour-visual scene-ads" aria-hidden="true">
+          <div class="demo-label">ВОЗМОЖНАЯ РЕКЛАМА</div>
+          <div class="demo-paper"><span class="demo-amber demo-badge">На разбор</span><b>Предложение из источника</b><span>Текст, найденные контакты и причина определения — в одной карточке.</span><div class="demo-faux-button">Это не реклама</div></div>
+          <div class="demo-footnote"><svg class="ic"><use href="#i-inbox"/></svg> Архив доступен в любой момент</div>
+        </div>
+        <div class="tour-copy"><span class="eyebrow">06 · ПОЛНЫЙ КОНТРОЛЬ</span><h2 id="tourTitle6">Рекламе — отдельное место</h2><p>Возможная реклама собирается отдельно. Смотрите причины, разбирайте предложения и отмечайте ошибки фильтра.</p><div class="tour-tip">Вернуться к этому знакомству можно в настройках.</div></div>
+      </section>
+    </div>
+    <footer class="tour-foot">
+      <div class="tour-progress"><span id="tourCounter" aria-live="polite">01 / 06</span><div class="dots" id="tourDots" role="group" aria-label="Выбрать слайд"></div></div>
+      <div class="tour-controls"><button id="tourPrev" class="tour-prev" aria-label="Предыдущий слайд"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button><button id="tourNext" class="accent">Дальше <svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button></div>
+    </footer>
   </div>
 </div>
 
@@ -315,11 +310,11 @@
       </div>
     </details>
 
-    <div class="card group">
-      <h2>Как это работает</h2>
-      <p class="hint">Короткое знакомство с продуктом: источники, проверка и публикация — в 6 слайдах.</p>
-      <button id="replayTour" class="ghost wide">Посмотреть ещё раз</button>
-    </div>
+    <button id="replayTour" class="tour-entry">
+      <span class="tour-entry-icon" aria-hidden="true"><svg class="ic"><use href="#i-bolt"/></svg></span>
+      <span class="tour-entry-copy"><b>Как работает Нейропостинг</b><small>Короткое знакомство · 6 слайдов</small></span>
+      <svg class="ic tour-entry-arrow" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
 
     <div class="card group plan" id="planCard"></div>
 
