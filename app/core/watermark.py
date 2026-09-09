@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import httpx
+from app.sources.safe_http import fetch
 from PIL import Image
 
 log = logging.getLogger("watermark")
@@ -42,10 +42,9 @@ async def apply(url: str, logo_path: Optional[str]) -> Optional[bytes]:
     if not logo_path or not Path(logo_path).exists():
         return None
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=40, follow_redirects=True)
-            resp.raise_for_status()
+        resp = await fetch(url, max_bytes=8 * 1024 * 1024,
+                           allowed_types=("image/jpeg", "image/png", "image/webp", "image/gif"))
         return await asyncio.to_thread(_overlay, resp.content, Path(logo_path))
     except Exception as exc:
-        log.warning("watermark failed for %s: %s", url, exc)
+        log.warning("watermark failed (%s)", type(exc).__name__)
         return None

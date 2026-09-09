@@ -1,7 +1,8 @@
 import httpx
 from selectolax.parser import HTMLParser
 
-from app.sources.telegram_web import UA, RawItem
+from app.sources.telegram_web import RawItem
+from app.sources.safe_http import fetch
 
 NOISE = "script, style, nav, header, footer, aside, form, noscript"
 
@@ -23,9 +24,7 @@ def _body_text(tree: HTMLParser) -> str:
 
 
 async def fetch_article(client: httpx.AsyncClient, url: str) -> RawItem:
-    resp = await client.get(
-        url, headers={"User-Agent": UA}, follow_redirects=True, timeout=30
-    )
+    resp = await fetch(url, allowed_types=("text/html", "application/xhtml+xml", "text/plain"))
     resp.raise_for_status()
     tree = HTMLParser(resp.text)
 

@@ -6,6 +6,7 @@ import feedparser
 from selectolax.parser import HTMLParser
 
 from app.sources.telegram_web import RawItem
+from app.sources.safe_http import fetch as fetch_public
 
 BR = re.compile(r"<br\s*/?>|</p>", re.I)
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -39,8 +40,8 @@ def _media_from_entry(entry) -> list[dict]:
     return unique[:1]
 
 
-def _parse(url: str) -> tuple[list[RawItem], Optional[str]]:
-    feed = feedparser.parse(url)
+def _parse(url: str, content: bytes) -> tuple[list[RawItem], Optional[str]]:
+    feed = feedparser.parse(content)
     if feed.bozo and not feed.entries:
         raise ValueError(f"не удалось прочитать ленту: {feed.bozo_exception}")
     title = (feed.feed.get("title") or "").strip() or None
@@ -67,4 +68,7 @@ def _parse(url: str) -> tuple[list[RawItem], Optional[str]]:
 
 
 async def fetch(url: str) -> tuple[list[RawItem], Optional[str]]:
-    return await asyncio.to_thread(_parse, url)
+    response = await fetch_public(url, allowed_types=(
+        "application/rss+xml", "application/atom+xml", "application/xml", "text/xml", "text/plain"
+    ))
+    return await asyncio.to_thread(_parse, str(response.url), response.content)
