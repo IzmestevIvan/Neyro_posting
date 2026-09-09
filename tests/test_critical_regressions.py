@@ -186,3 +186,17 @@ async def test_revoked_owner_does_not_reach_ai_or_sources(store, channel, monkey
     await scheduler.run_digest(None, channel)
     fetch.assert_not_called()
     process.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_ready_excludes_raw_and_sent(store, channel):
+    from app.api.routes import channel_stats
+    for status, text in [('new', 'raw'), ('pending', 'ready'), ('failed', ''), ('published', 'sent')]:
+        await store.execute(
+            "INSERT INTO posts (channel_id, uid, raw_text, text_out, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (channel['id'], status, 'original', text, status, store.utcnow()),
+        )
+    user = await store.fetch_one('SELECT * FROM users WHERE tg_id = 1')
+    stats = await channel_stats(channel['id'], user)
+    assert stats['ready'] == 1
+    assert stats['system'] is None

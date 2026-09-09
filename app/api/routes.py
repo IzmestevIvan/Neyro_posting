@@ -41,25 +41,32 @@ def _clean_settings(payload: dict) -> dict:
     out: dict[str, Any] = {}
     for key, value in payload.items():
         if key in BOOL_FIELDS:
-            out[key] = int(bool(value))
+            if type(value) is not bool:
+                raise HTTPException(422, f"{key}: ожидается переключатель true/false")
+            out[key] = int(value)
         elif key in TEXT_FIELDS:
             out[key] = str(value)[:4000]
-        elif key == "delay_mode" and value in DELAY_MODES:
+        elif key == "delay_mode" and isinstance(value, str) and value in DELAY_MODES:
             out[key] = value
-        elif key == "pace" and value in PACE_MODES:
+        elif key == "pace" and isinstance(value, str) and value in PACE_MODES:
             out[key] = value
-        elif key == "tz" and value in TIMEZONES:
+        elif key == "tz" and isinstance(value, str) and value in TIMEZONES:
             out[key] = value
-        elif key == "lang" and value in LANGUAGES:
+        elif key == "lang" and isinstance(value, str) and value in LANGUAGES:
             out[key] = value
-        elif key == "quality" and value in QUALITY:
+        elif key == "quality" and isinstance(value, str) and value in QUALITY:
             out[key] = value
-        elif key == "digest_time" and TIME_RE.match(str(value)):
-            out[key] = str(value)
-        elif key == "window_start":
-            out[key] = max(0, min(23, int(value)))
-        elif key == "window_end":
-            out[key] = max(1, min(24, int(value)))
+        elif key == "digest_time":
+            if not isinstance(value, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+                raise HTTPException(422, "время дайджеста: укажите ЧЧ:ММ от 00:00 до 23:59")
+            out[key] = value
+        elif key in {"window_start", "window_end"}:
+            low, high = (0, 23) if key == "window_start" else (1, 24)
+            if isinstance(value, bool) or not re.fullmatch(r"\d{1,2}", str(value)) or not low <= int(value) <= high:
+                raise HTTPException(422, f"{key}: укажите целый час от {low} до {high}")
+            out[key] = int(value)
+        else:
+            raise HTTPException(422, f"неизвестная настройка или недопустимое значение: {key}")
     if not out:
         raise HTTPException(400, "нечего сохранять")
     return out
@@ -197,7 +204,9 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
     counts = await db.fetch_one(
         "SELECT "
         " COUNT(*) FILTER (WHERE status IN ('approved', 'pending', 'digest', 'new')) AS queued,"
-        " COUNT(*) FILTER (WHERE status = 'pending') AS pending"
+        " COUNT(*) FILTER (WHERE status = 'pending') AS pending,"
+        " COUNT(*) FILTER (WHERE status IN ('approved', 'pending', 'digest', 'failed') "
+        " AND NULLIF(trim(text_out), '') IS NOT NULL) AS ready"
         " FROM posts WHERE channel_id = ?",
         (channel_id,),
     )
@@ -233,6 +242,7 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         "today": (today_row or {}).get("published") or 0,
         "queued": (counts or {}).get("queued") or 0,
         "pending": (counts or {}).get("pending") or 0,
+        "ready": (counts or {}).get("ready") or 0,
         "duplicates": (totals or {}).get("duplicates") or 0,
         "filtered": (totals or {}).get("filtered") or 0,
         "sources": sources["n"],

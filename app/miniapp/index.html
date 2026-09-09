@@ -44,7 +44,7 @@
       </div>
       <h2>Вы выбираете источники</h2>
       <p>Телеграм-каналы и RSS-ленты, за которыми стоит следить. Бот проверяет их
-        каждые полторы минуты и забирает всё новое.</p>
+        регулярно и готовит новые материалы.</p>
     </section>
 
     <section class="slide">
@@ -55,7 +55,7 @@
         <span class="funnel"></span>
         <span class="keep">новость</span>
       </div>
-      <h2>Мусор не проходит</h2>
+      <h2>Меньше ручной сортировки</h2>
       <p>Рекламу, повторы и оффтоп отсеиваем до того, как вы их увидите. Плюс ваши
         стоп-слова и фильтр «только популярное».</p>
     </section>
@@ -78,7 +78,7 @@
         <span class="tick"><svg class="ic"><use href="#i-check"/></svg></span>
       </div>
       <h2>Вторая модель проверяет первую</h2>
-      <p>Отдельная нейросеть сверяет результат с оригиналом и ищет выдуманные цифры,
+      <p>В режиме «Суперпостинг» отдельная проверка сверяет результат с оригиналом и ищет выдуманные цифры,
         имена и цитаты. Вердикт видно на карточке поста.</p>
     </section>
 
@@ -125,7 +125,7 @@
 
   <div class="channelbar" id="channelBar">
     <div class="select-wrap">
-      <select id="channelSelect"></select>
+      <select id="channelSelect" aria-label="Текущий канал"></select>
     </div>
     <button id="addChannel" class="ghost square" title="Добавить канал">
       <svg class="ic"><use href="#i-plus"/></svg>
@@ -134,7 +134,7 @@
 
   <div class="addrow" id="addChannelRow" hidden>
     <input type="text" id="channelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off">
-    <button id="channelSubmit" class="accent square"><svg class="ic"><use href="#i-check"/></svg></button>
+    <button id="channelSubmit" aria-label="Подключить канал" class="accent square"><svg class="ic"><use href="#i-check"/></svg></button>
   </div>
 
   <!-- ворота по промокоду -->
@@ -167,10 +167,13 @@
 
   <!-- главная -->
   <section id="page-home" class="page">
+    <div class="workspace-intro"><span class="eyebrow">ВАША РЕДАКЦИЯ</span><h2>Всё готово к следующему посту?</h2><p class="muted">Источники, проверка и публикация — под вашим контролем.</p></div>
+    <div id="nextStep" class="next-step" aria-live="polite"></div>
     <div id="statsGrid" class="grid"></div>
     <button id="publishNow" class="accent wide tall">
       <svg class="ic"><use href="#i-bolt"/></svg> Опубликовать сейчас
     </button>
+    <p id="publishHint" class="hint action-hint">Публикует один готовый пост, минуя расписание. Лимит тарифа сохраняется.</p>
     <h3 class="section">Публикации · 7 дней</h3>
     <div id="postsChart" class="card chart"></div>
     <h3 class="section">Подписчики</h3>
@@ -183,10 +186,11 @@
 
   <!-- лента -->
   <section id="page-feed" class="page" hidden>
-    <h3 class="section">На одобрение · <span id="pendingCount">0</span></h3>
+    <div class="workspace-intro"><span class="eyebrow">КОНТЕНТ</span><h2>Публикации</h2></div>
+    <div class="feed-tabs" role="group" aria-label="Список публикаций"><button id="showPending" class="on" aria-pressed="true">На проверке <span id="pendingCount">0</span></button><button id="showHistory" aria-pressed="false">История</button></div>
     <p class="hint">В чате с ботом ответьте на карточку своей правкой («короче», «без эмодзи») —
       он перепишет. Ссылка или свой текст в чат — ручной пост.</p>
-    <div id="feed"></div>
+    <div id="feed"></div><div id="history" hidden></div>
   </section>
 
   <!-- реклама -->
@@ -203,13 +207,14 @@
     <p class="hint">Откуда бот берёт новости: @канал, ссылка t.me или адрес RSS-ленты.</p>
     <div class="addrow">
       <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss">
-      <button id="addSource" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
+      <button id="addSource" aria-label="Добавить источник" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
     </div>
     <div id="sources"></div>
   </section>
 
   <!-- настройки -->
   <section id="page-settings" class="page" hidden>
+    <div class="workspace-intro"><span class="eyebrow">ПРАВИЛА КАНАЛА</span><h2>Настройки редакции</h2><p id="saveStatus" class="hint" role="status">Переключатели сохраняются сразу. Текст — кнопкой под полем.</p></div>
     <details class="card group" open>
       <summary><span>Публикация</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
@@ -346,7 +351,7 @@
 
   <nav class="nav" id="nav">
     <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span>Главная</span></button>
-    <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span>Лента</span><i id="feedBadge" class="badge" hidden></i></button>
+    <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span>Посты</span><i id="feedBadge" class="badge" hidden></i></button>
     <button data-page="ads"><svg class="ic"><use href="#i-ads"/></svg><span>Реклама</span><i id="adsBadge" class="badge" hidden></i></button>
     <button data-page="sources"><svg class="ic"><use href="#i-sources"/></svg><span>Источники</span></button>
     <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span>Настройки</span></button>

@@ -15,6 +15,14 @@ const PACE_LABELS = [['as_they_come', 'Как приходят'], ['3', '3 в д
 let boot = null;
 let channel = null;
 let page = 'home';
+let saveQueue = Promise.resolve();
+let savingCount = 0;
+const revisions = {};
+let feedView = 'pending';
+let publishingNow = false;
+const drafts = new Map();
+const readTicket = (key) => { const token = (revisions[key] || 0) + 1; revisions[key] = token; const id = channel?.id; return () => channel?.id === id && revisions[key] === token; };
+const safeLink = (value) => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -28,6 +36,7 @@ function toast(message, isError = false) {
   const el = document.createElement('div');
   el.className = `toast${isError ? ' err' : ''}`;
   el.textContent = message;
+  el.setAttribute('role', isError ? 'alert' : 'status');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3400);
 }
@@ -38,7 +47,10 @@ async function api(path, options = {}) {
     headers: { 'Content-Type': 'application/json', 'X-Init-Data': initData, ...(options.headers || {}) },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `Ошибка ${response.status}`);
+  if (!response.ok) {
+    const detail = typeof payload.detail === 'string' ? payload.detail : 'Проверьте значения полей и попробуйте снова';
+    throw new Error(detail || `Ошибка ${response.status}`);
+  }
   return payload;
 }
 
@@ -52,6 +64,7 @@ function plural(n, one, few, many) {
 function ago(iso) {
   if (!iso) return null;
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!Number.isFinite(minutes)) return 'дата неизвестна';
   if (minutes < 1) return 'только что';
   if (minutes < 60) return `${minutes} мин назад`;
   const hours = Math.floor(minutes / 60);
@@ -69,18 +82,22 @@ function formatDate(iso) {
 
 function renderStats(stats) {
   const cells = [
-    ['ok', stats.published, 'опубликовано'],
-    ['accent-t', stats.today, 'сегодня'],
-    ['warn', stats.queued, 'в очереди'],
-    ['', stats.duplicates, 'дубликаты'],
-    ['', stats.filtered, 'отфильтровано'],
-    ['', stats.sources, 'источники'],
-    ['accent-t', stats.subscribers, 'подписчики'],
-    ['accent-t', stats.avg_views, 'ср. просмотры'],
-    ['accent-t', stats.ai_requests, 'запросов ИИ'],
-    ['', stats.daily_limit, 'лимит/день'],
-    ['ok', stats.remaining, 'осталось'],
+    ['ok', stats.today, 'опубликовано сегодня'],
+    ['accent-t', stats.pending, 'ждут проверки'],
+    ['', stats.subscribers || '—', 'подписчики'],
+    ['', stats.remaining, 'постов осталось · все каналы'],
   ];
+  const ready = stats.ready || 0;
+  $('#publishNow').disabled = publishingNow || !ready || stats.remaining <= 0;
+  $('#publishHint').textContent = stats.remaining <= 0 ? 'Дневной лимит исчерпан. Готовые посты останутся в очереди.'
+    : !ready ? 'Готовых постов пока нет. Добавьте источники или отправьте текст боту.'
+    : `Готово: ${ready}. Кнопка отправит один пост сразу, минуя расписание и паузу.`;
+  const next = !stats.sources ? ['Подключите первый источник', 'Добавьте канал или RSS-ленту, чтобы получать материалы.', 'sources', 'Добавить источник']
+    : stats.paused ? ['Сбор материалов на паузе', 'Чтобы получать новые материалы, снимите паузу в настройках.', 'settings', 'Открыть настройки']
+    : stats.pending ? ['Есть материалы для проверки', 'Прочитайте текст и вердикт проверки перед публикацией.', 'feed', 'Проверить посты']
+    : ['Источники подключены', stats.mode === 'автопостинг' ? 'Готовые материалы публикуются по вашим правилам.' : 'Новые материалы появятся в разделе «Посты» для вашего одобрения.', 'sources', 'Посмотреть источники'];
+  $('#nextStep').innerHTML = `<div><span class="eyebrow">СЛЕДУЮЩИЙ ШАГ</span><h3>${next[0]}</h3><p>${next[1]}</p></div><button class="ghost" data-go="${next[2]}">${next[3]} ${icon('back')}</button>`;
+
   $('#statsGrid').innerHTML = cells
     .map(([cls, value, label]) => `<div class="stat ${cls}"><b>${value ?? 0}</b><i>${label}</i></div>`)
     .join('');
@@ -143,32 +160,34 @@ function setBadge(selector, count) {
 
 async function loadFeed() {
   if (!channel) return;
+  const current = readTicket('feed');
   const posts = await api(`/channels/${channel.id}/feed`);
+  if (!current()) return;
   $('#pendingCount').textContent = posts.length;
   setBadge('#feedBadge', posts.length);
   if (!posts.length) {
     $('#feed').innerHTML = '<p class="empty-note">Пусто — все посты разобраны.</p>';
     return;
   }
-  $('#feed').innerHTML = posts
+  $('#feed').innerHTML = (posts.length === 30 ? '<p class="hint">Показаны последние 30 постов. После обработки появятся остальные.</p>' : '') + posts
     .map((post) => {
       const photo = post.media.find((m) => m.type === 'photo' && (m.url || '').startsWith('http'));
       const attached = !photo && post.media.length
         ? `<p class="note">${icon('clip')}<span>${post.media.length} медиа из чата — прикрепится при публикации</span></p>` : '';
       const warn = post.fact_check && post.fact_check.ok === false
-        ? `<p class="note warn">${icon('alert')}<span>Фактчек: ${esc(post.fact_check.verdict || 'есть замечания')}</span></p>` : '';
+        ? `<p class="note warn">${icon('alert')}<span>Фактчек: ${esc(post.fact_check.verdict || 'есть замечания')}</span></p>` : `<p class="note ${post.fact_check?.ok === true ? 'ok' : ''}">${icon('shield')}<span>${post.fact_check?.ok === true ? 'Проверка пройдена · сверьте важные факты с оригиналом' : 'Без финального фактчека · проверьте текст перед публикацией'}</span></p>`;
       return `<article class="post" data-id="${post.id}">
         <header>
           <span>${esc(post.source_title || 'источник')} · ${ago(post.created_at) || ''}</span>
-          ${post.url ? `<a href="${esc(post.url)}" target="_blank">${icon('link')}оригинал</a>` : ''}
+          ${post.url ? `<a href="${esc(safeLink(post.url))}" target="_blank" rel="noopener noreferrer">${icon('link')}оригинал</a>` : ''}
         </header>
         ${photo ? `<img src="${esc(photo.url)}" loading="lazy" alt="">` : ''}
         ${attached}${warn}
         <div class="text">${esc(post.text_out || post.raw_text)}</div>
         <div class="acts">
-          <button class="ok" data-act="approve">${icon('check')}</button>
-          <button data-act="regen">${icon('refresh')}</button>
-          <button class="no" data-act="reject">${icon('close')}</button>
+          <button class="ok" data-act="approve" ${post.text_out?.trim() ? '' : 'disabled title="Нет готового текста"'}>${icon('check')} Опубликовать</button>
+          <button data-act="regen">${icon('refresh')} Переписать</button>
+          <button class="no" data-act="reject" aria-label="Отклонить пост">${icon('close')}</button>
         </div>
       </article>`;
     })
@@ -187,7 +206,7 @@ $('#feed').addEventListener('click', async (event) => {
     const result = await api(`/posts/${id}/${action}`, { method: 'POST' });
     tg?.HapticFeedback?.notificationOccurred('success');
     if (action === 'regen') {
-      article.querySelector('.text').textContent = result.text;
+      await loadFeed();
       toast('Переписано');
     } else {
       article.remove();
@@ -205,7 +224,9 @@ $('#feed').addEventListener('click', async (event) => {
 
 async function loadAds() {
   if (!channel) return;
+  const current = readTicket('ads');
   const offers = await api(`/channels/${channel.id}/ads`);
+  if (!current()) return;
   $('#adsCount').textContent = offers.length;
   setBadge('#adsBadge', offers.filter((o) => o.status === 'new').length);
   if (!offers.length) {
@@ -217,14 +238,14 @@ async function loadAds() {
       const contacts = (offer.contacts || []).map((c) => {
         const href = c.startsWith('t.me/') ? `https://${c}` : c.startsWith('@') ? `https://t.me/${c.slice(1)}`
           : c.includes('@') ? `mailto:${c}` : null;
-        return href ? `<a href="${esc(href)}" target="_blank">${esc(c)}</a>` : `<span>${esc(c)}</span>`;
+        return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(c)}</a>` : `<span>${esc(c)}</span>`;
       }).join('');
       return `<article class="ad${offer.status === 'contacted' ? ' done' : ''}" data-id="${offer.id}">
         <header>
           <span class="who">${esc(offer.advertiser || 'рекламодатель не определён')}</span>
           <span class="seen">${offer.seen_count > 1 ? offer.seen_count + '× · ' : ''}${ago(offer.last_seen_at) || 'только что'}</span>
         </header>
-        <p class="note">${icon('sources')}<span>${esc(offer.source_title || 'источник')}${offer.url ? ` · <a href="${esc(offer.url)}" target="_blank" style="color:var(--accent)">оригинал</a>` : ''}</span></p>
+        <p class="note">${icon('sources')}<span>${esc(offer.source_title || 'источник')}${offer.url ? ` · <a href="${esc(safeLink(offer.url))}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">оригинал</a>` : ''}</span></p>
         ${contacts ? `<div class="contacts">${contacts}</div>` : '<p class="note">Контактов в тексте нет — смотрите оригинал.</p>'}
         <div class="excerpt">${esc(offer.raw_text)}</div>
         <div class="acts">
@@ -253,7 +274,9 @@ $('#ads').addEventListener('click', async (event) => {
 
 async function loadSources() {
   if (!channel) return;
+  const current = readTicket('sources');
   const sources = await api(`/channels/${channel.id}/sources`);
+  if (!current()) return;
   $('#sourcesCount').textContent = sources.length;
   $('#sources').innerHTML = sources.length
     ? sources
@@ -300,7 +323,7 @@ $('#addSource').addEventListener('click', async () => {
 function fillSettings() {
   if (!channel) return;
   $$('[data-field]').forEach((el) => {
-    const value = channel[el.dataset.field];
+    const value = drafts.get(`${channel.id}:${el.dataset.field}`) ?? channel[el.dataset.field];
     if (el.type === 'checkbox') el.checked = !!value;
     else el.value = value ?? '';
   });
@@ -349,23 +372,56 @@ function updateSignaturePreview() {
   $('#sigUrl').placeholder = channel?.username ? `пусто — на t.me/${channel.username}` : 'пусто — на этот канал';
 }
 
-async function save(body, silent = false) {
-  if (!channel) return;
-  try {
-    channel = await api(`/channels/${channel.id}`, { method: 'PATCH', body: JSON.stringify(body) });
-    boot.channels = boot.channels.map((c) => (c.id === channel.id ? channel : c));
-    if (!silent) toast('Сохранено');
-  } catch (error) {
-    toast(error.message, true);
-    fillSettings(); // иначе тумблер остаётся переключённым, хотя на сервере ничего не изменилось
-  }
+function save(body, silent = false) {
+  if (!channel) return Promise.resolve();
+  const id = channel.id;
+  savingCount++;
+  $('#saveStatus').textContent = 'Сохраняем изменения…';
+  $('#channelSelect').disabled = true;
+  $('#addChannel').disabled = true;
+  const run = async () => {
+    try {
+      const updated = await api(`/channels/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      boot.channels = boot.channels.map(c => c.id === id ? updated : c);
+      if (channel?.id === id) channel = updated;
+      Object.entries(body).forEach(([key, value]) => { if (drafts.get(`${id}:${key}`) === value) drafts.delete(`${id}:${key}`); });
+      $('#saveStatus').textContent = 'Изменения сохранены';
+      if (!silent) toast('Сохранено');
+      if (['paused', 'autopost'].some(key => key in body)) await refreshStats();
+    } catch (error) {
+      $('#saveStatus').textContent = `Не сохранено: ${error.message}. Повторите изменение.`;
+      toast(error.message, true);
+      if (channel?.id === id) {
+        for (const [key, selector] of [['delay_mode', '#delayChips'], ['pace', '#paceChips']]) {
+          if (key in body) $(selector).querySelectorAll('.chip').forEach(el => el.classList.toggle('on', el.dataset.key === String(channel[key])));
+        }
+        if ('quality' in body) { $('#quality').value = QUALITY.indexOf(channel.quality); updateQualityLabel(); }
+      }
+      // Restore only failed fields, preserving unrelated text drafts.
+      if (channel?.id === id) Object.keys(body).forEach(key => {
+        const el = $(`[data-field="${key}"]`);
+        if (el && (el.type === 'checkbox' || el.type === 'number' || el.tagName === 'SELECT')) {
+          if (el.type === 'checkbox') el.checked = !!channel[key]; else el.value = channel[key];
+        }
+      });
+    } finally {
+      savingCount--;
+      $('#channelSelect').disabled = savingCount > 0;
+      $('#addChannel').disabled = savingCount > 0;
+    }
+  };
+  saveQueue = saveQueue.then(run, run);
+  return saveQueue;
 }
 
 $$('[data-field]').forEach((el) => {
+  if (el.tagName === 'TEXTAREA' || ['text', 'password'].includes(el.type)) {
+    el.addEventListener('input', () => { if (channel) drafts.set(`${channel.id}:${el.dataset.field}`, el.value); });
+  }
   if (el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'number') {
     el.addEventListener('change', () => {
       save({ [el.dataset.field]: el.type === 'checkbox' ? el.checked : el.value }, true);
-      if (['paused', 'autopost'].includes(el.dataset.field)) refreshStats();
+
     });
   }
 });
@@ -506,6 +562,8 @@ $('#openAdmin').addEventListener('click', () => {
 });
 
 $('#closeAdmin').addEventListener('click', () => {
+  if (!boot.user.has_access) return showGate();
+  if (!channel) return showOnboarding();
   $('#nav').hidden = false;
   $('#channelBar').hidden = false;
   openPage(page);
@@ -580,13 +638,18 @@ Object.keys(SUBMIT_BY_INPUT).forEach((id) => {
 });
 
 $('#channelSelect').addEventListener('change', (event) => {
+  Object.keys(revisions).forEach(key => revisions[key]++);
   channel = boot.channels.find((c) => c.id === Number(event.target.value));
+  ['feed', 'ads', 'sources', 'statsGrid', 'nextStep', 'history'].forEach(id => { $(`#${id}`).innerHTML = ''; });
+  $('#publishNow').disabled = true;
+  setBadge('#feedBadge', 0); setBadge('#adsBadge', 0);
   fillSettings();
   openPage(page);
 });
 
 $('#publishNow').addEventListener('click', async () => {
   if (!channel) return;
+  publishingNow = true;
   $('#publishNow').disabled = true;
   try {
     await api(`/channels/${channel.id}/publish_now`, { method: 'POST' });
@@ -595,7 +658,8 @@ $('#publishNow').addEventListener('click', async () => {
   } catch (error) {
     toast(error.message, true);
   } finally {
-    $('#publishNow').disabled = false;
+    publishingNow = false;
+    await refreshStats();
   }
 });
 
@@ -607,16 +671,18 @@ function renderChannelList() {
 
 async function refreshStats() {
   if (!channel) return;
+  const current = readTicket('stats');
   try {
-    renderStats(await api(`/channels/${channel.id}/stats`));
+    const stats = await api(`/channels/${channel.id}/stats`);
+    if (current()) renderStats(stats);
   } catch (error) {
-    $('#status').textContent = error.message;
+    if (current()) $('#status').textContent = error.message;
   }
 }
 
 /* ---------- navigation ---------- */
 
-const PAGE_LOADERS = { home: refreshStats, feed: loadFeed, ads: loadAds, sources: loadSources };
+const PAGE_LOADERS = { home: refreshStats, feed: () => feedView === 'pending' ? loadFeed() : loadHistory(), ads: loadAds, sources: loadSources };
 
 function openPage(name) {
   if (!channel) return;
@@ -727,7 +793,8 @@ async function start() {
   try {
     boot = await api('/bootstrap');
   } catch (error) {
-    $('#boot').innerHTML = `<p class="empty-note">Не удалось войти: ${esc(error.message)}</p>`;
+    $('#boot').innerHTML = `<div class="card hero"><h2>Не удалось открыть редакцию</h2><p class="muted">${esc(error.message)}</p><p>Откройте приложение через кнопку в Telegram-боте.</p><button class="accent" id="retryBoot">Попробовать снова</button></div>`;
+    $('#retryBoot').onclick = start;
     return;
   }
 
@@ -753,4 +820,21 @@ async function start() {
   enterNormalMode();
 }
 
+$('#nextStep').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });
+const HISTORY_LABELS = { published: 'Опубликован', failed: 'Ошибка публикации', filtered: 'Отфильтрован', duplicate: 'Дубликат', rejected: 'Отклонён', approved: 'В очереди', new: 'Обрабатывается', digest: 'В дайджесте', publishing: 'Отправляется' };
+async function loadHistory() {
+  if (!channel) return;
+  const current = readTicket('history');
+  const rows = await api(`/channels/${channel.id}/history`);
+  if (!current()) return;
+  $('#history').innerHTML = rows.length ? '<p class="hint">Последние 50 событий обработки.</p>' + rows.map(row => `<article class="post history-item"><header><span>${esc(row.source_title || 'Ручной пост')}</span><span class="tag">${esc(HISTORY_LABELS[row.status] || row.status)}</span></header><p>${esc(row.preview)}</p>${row.reason ? `<p class="hint">${esc(row.reason)}</p>` : ''}<span class="hint">${esc(ago(row.published_at || row.created_at))}</span></article>`).join('') : '<div class="empty-note">Здесь будет история обработки и публикаций.</div>';
+}
+function switchFeed(view) {
+  feedView = view;
+  $('#feed').hidden = view !== 'pending'; $('#history').hidden = view !== 'history';
+  [$('#showPending'), $('#showHistory')].forEach((el, i) => { const active = (i === 0) === (view === 'pending'); el.classList.toggle('on', active); el.setAttribute('aria-pressed', active); });
+  (view === 'pending' ? loadFeed() : loadHistory()).catch(e => toast(e.message, true));
+}
+$('#showPending').onclick = () => switchFeed('pending');
+$('#showHistory').onclick = () => switchFeed('history');
 start();

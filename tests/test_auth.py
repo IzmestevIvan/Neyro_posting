@@ -86,8 +86,11 @@ class TestSettingsWhitelist:
             _clean_settings({"autopost = 1, owner_id": 7})
 
     def test_booleans_are_normalised(self):
-        assert _clean_settings({"autopost": "да"}) == {"autopost": 1}
-        assert _clean_settings({"autopost": ""}) == {"autopost": 0}
+        assert _clean_settings({"autopost": True}) == {"autopost": 1}
+        assert _clean_settings({"autopost": False}) == {"autopost": 0}
+        for value in ("false", "да", "", 1, None):
+            with pytest.raises(HTTPException):
+                _clean_settings({"autopost": value})
 
     def test_enums_reject_unknown_values(self):
         with pytest.raises(HTTPException):
@@ -96,11 +99,11 @@ class TestSettingsWhitelist:
             _clean_settings({"tz": "Mars/Olympus"})
         assert _clean_settings({"quality": "fast"}) == {"quality": "fast"}
 
-    def test_window_hours_are_clamped_to_valid_datetime_range(self):
-        assert _clean_settings({"window_start": 99})["window_start"] == 23
-        assert _clean_settings({"window_start": -5})["window_start"] == 0
-        assert _clean_settings({"window_end": 99})["window_end"] == 24
-        assert _clean_settings({"window_end": 0})["window_end"] == 1
+    def test_window_hours_reject_invalid_input(self):
+        for key, value in (("window_start", 99), ("window_start", -5), ("window_end", 99), ("window_end", 0), ("window_start", ""), ("window_start", 1.5)):
+            with pytest.raises(HTTPException):
+                _clean_settings({key: value})
+        assert _clean_settings({"window_start": "9", "window_end": 24}) == {"window_start": 9, "window_end": 24}
 
     def test_digest_time_format_is_enforced(self):
         assert _clean_settings({"digest_time": "21:30"}) == {"digest_time": "21:30"}
@@ -109,3 +112,9 @@ class TestSettingsWhitelist:
 
     def test_free_text_is_length_capped(self):
         assert len(_clean_settings({"instructions": "я" * 9000})["instructions"]) == 4000
+
+
+@pytest.mark.parametrize("value", ["24:00", "99:99", "12:60", "1:30", None])
+def test_digest_time_rejects_impossible_clocks(value):
+    with pytest.raises(HTTPException):
+        _clean_settings({"digest_time": value})
