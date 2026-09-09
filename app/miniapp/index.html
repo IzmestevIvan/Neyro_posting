@@ -203,6 +203,18 @@
       <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss">
       <button id="addSource" aria-label="Добавить источник" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
     </div>
+    <details class="card group" id="copySourcesPanel">
+      <summary>Скопировать из другого канала</summary>
+      <div class="copy-content">
+      <p class="hint">Выберите источники своего канала. Уже добавленные будут пропущены.</p>
+      <label for="copyFromChannel">Откуда скопировать</label>
+      <select id="copyFromChannel"><option value="">Выберите канал</option></select>
+      <div id="copySourceList" role="group" aria-label="Источники для копирования"></div>
+      <button id="copySources" class="accent" disabled>Добавить выбранные</button>
+      <p id="copySourcesStatus" class="hint" role="status"></p>
+      </div>
+    </details>
+    <p class="hint">Ещё быстрее: перешлите боту пост публичного канала и нажмите «Добавить канал как источник».</p>
     <div id="sources"></div>
   </section>
 

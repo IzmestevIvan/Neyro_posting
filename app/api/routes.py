@@ -441,6 +441,21 @@ async def add_source(
     return await db.fetch_one("SELECT * FROM sources WHERE id = ?", (source_id,))
 
 
+@router.post("/channels/{channel_id}/sources/copy")
+async def copy_channel_sources(channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)) -> dict:
+    from app.sources.manage import copy_sources
+    origin = payload.get("from_channel_id")
+    ids = payload.get("source_ids")
+    if type(origin) is not int or not isinstance(ids, list):
+        raise HTTPException(422, "Укажите канал и выбранные источники")
+    try:
+        return await copy_sources(user["tg_id"], channel_id, origin, ids)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.delete("/sources/{source_id}")
 async def delete_source(source_id: int, user: dict = Depends(active_user)) -> dict:
     source = await db.fetch_one("SELECT * FROM sources WHERE id = ?", (source_id,))

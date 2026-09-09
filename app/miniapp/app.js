@@ -281,11 +281,66 @@ $('#ads').addEventListener('click', async (event) => {
 
 /* ---------- sources ---------- */
 
+function resetSourceCopy() {
+  $('#copySourcesPanel').open = false;
+  $('#copyFromChannel').innerHTML = '<option value="">Выберите канал</option>' +
+    (boot?.channels || []).filter(c => c.id !== channel?.id).map(c => `<option value="${c.id}">${esc(c.title || c.username)}</option>`).join('');
+  $('#copySourceList').innerHTML = '';
+  $('#copySources').disabled = true;
+  $('#copySourcesStatus').textContent = (boot?.channels || []).length < 2 ? 'Для копирования подключите второй канал.' : '';
+}
+
+$('#copyFromChannel').addEventListener('change', async () => {
+  const current = readTicket('copySources');
+  const origin = Number($('#copyFromChannel').value);
+  $('#copySourceList').innerHTML = '';
+  $('#copySources').disabled = true;
+  $('#copySourcesStatus').textContent = origin ? 'Загружаю источники…' : '';
+  if (!origin) return;
+  try {
+    const sources = await api(`/channels/${origin}/sources`);
+    if (!current()) return;
+    $('#copySourceList').innerHTML = sources.map(s => `<label class="copy-source"><input type="checkbox" value="${s.id}"><span><b>${esc(s.title || s.ref)}</b><small>${esc(s.kind === 'tg' ? '@' + s.ref : s.ref)}</small></span></label>`).join('');
+    $('#copySourcesStatus').textContent = sources.length ? 'Отметьте нужные источники.' : 'В этом канале пока нет источников.';
+  } catch (error) { if (current()) $('#copySourcesStatus').textContent = error.message; }
+});
+$('#copySourceList').addEventListener('change', () => {
+  const n = $('#copySourceList').querySelectorAll('input:checked').length;
+  $('#copySources').disabled = !n;
+  $('#copySources').textContent = n ? `Добавить выбранные · ${n}` : 'Добавить выбранные';
+});
+$('#copySources').addEventListener('click', async () => {
+  if (!channel) return;
+  const current = readTicket('copySources');
+  const target = channel.id;
+  const source_ids = [...$('#copySourceList').querySelectorAll('input:checked')].map(el => Number(el.value));
+  if (!source_ids.length) return;
+  $('#copySources').disabled = true;
+  $('#copyFromChannel').disabled = true;
+  $('#copySourceList').querySelectorAll('input').forEach(el => el.disabled = true);
+  try {
+    const result = await api(`/channels/${target}/sources/copy`, {method:'POST', body:JSON.stringify({from_channel_id:Number($('#copyFromChannel').value), source_ids})});
+    if (!current()) return;
+    $('#copySourcesStatus').textContent = `Добавлено: ${result.added}. Уже были в канале: ${result.skipped}.`;
+    $('#copySourceList').querySelectorAll('input').forEach(el => el.checked = false);
+    await loadSources();
+  } catch (error) { if (current()) $('#copySourcesStatus').textContent = error.message; }
+  finally {
+    $('#copyFromChannel').disabled = false;
+    if (current()) {
+      $('#copySourceList').querySelectorAll('input').forEach(el => el.disabled = false);
+      $('#copySources').disabled = !$('#copySourceList').querySelectorAll('input:checked').length;
+      $('#copySources').textContent = 'Добавить выбранные';
+    }
+  }
+});
+
 async function loadSources() {
   if (!channel) return;
   const current = readTicket('sources');
   const sources = await api(`/channels/${channel.id}/sources`);
   if (!current()) return;
+  if ($('#copySourcesPanel').dataset.channel !== String(channel.id)) { resetSourceCopy(); $('#copySourcesPanel').dataset.channel = String(channel.id); }
   $('#sourcesCount').textContent = sources.length;
   $('#sources').innerHTML = sources.length
     ? sources
@@ -652,6 +707,7 @@ $('#channelSelect').addEventListener('change', (event) => {
   ['feed', 'ads', 'sources', 'statsGrid', 'nextStep', 'history'].forEach(id => { $(`#${id}`).innerHTML = ''; });
   $('#publishNow').disabled = true;
   setBadge('#feedBadge', 0); setBadge('#adsBadge', 0);
+  resetSourceCopy();
   fillSettings();
   openPage(page);
 });

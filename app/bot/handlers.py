@@ -2,6 +2,8 @@ import html
 import json
 import logging
 import re
+import time
+import secrets
 from typing import Optional
 
 import httpx
@@ -138,6 +140,79 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("id"))
 async def cmd_id(message: Message) -> None:
     await message.answer(f"Ваш ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
+
+
+@router.message(F.forward_origin)
+async def on_forward(message: Message, bot: Bot) -> None:
+    if message.chat.type != "private":
+        return
+    origin = message.forward_origin
+    chat = getattr(origin, "chat", None)
+    ref = getattr(chat, "username", None) if getattr(origin, "type", None) == "channel" else None
+    if ref and not re.fullmatch(r"[A-Za-z0-9_]{4,32}", ref):
+        ref = None
+    # One expiring slot per user: bounded storage and no cross-user callback reuse.
+    token = secrets.token_hex(6)
+    snapshot = message.model_dump(mode="json", include={"message_id", "date", "chat", "from_user", "text", "caption", "photo", "video"}, exclude_none=True)
+    await db.set_kv(f"forward:{message.from_user.id}", {
+        "token": token, "expires": time.time() + 86400, "ref": ref,
+        "title": getattr(chat, "title", None) or ref, "message": snapshot,
+    })
+    buttons = []
+    if ref:
+        buttons.append([InlineKeyboardButton(text="Добавить канал как источник", callback_data=f"src:choose:{token}")])
+    if message.text or message.caption:
+        buttons.append([InlineKeyboardButton(text="Подготовить публикацию", callback_data=f"src:post:{token}")])
+    text = (f"Канал @{ref}. Что сделать с пересланным постом?" if ref else
+            "Telegram не передал ссылку на публичный канал. Чтобы добавить источник, вставьте его ссылку во вкладке «Источники».")
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None)
+
+
+@router.callback_query(F.data.startswith("src:"))
+async def on_forward_action(callback: CallbackQuery, bot: Bot) -> None:
+    parts = callback.data.split(":")
+    state = await db.get_kv(f"forward:{callback.from_user.id}")
+    if len(parts) < 3 or not state or state.get("token") != parts[2] or state.get("expires", 0) < time.time():
+        await callback.answer("Перешлите пост заново: этот выбор устарел", show_alert=True)
+        return
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    if parts[1] == "post":
+        # Consume before AI work so double taps cannot create duplicate drafts.
+        changed = await db.update("DELETE FROM kv WHERE k=? AND v->>'token'=?", (f"forward:{callback.from_user.id}", parts[2]))
+        if changed:
+            original = Message.model_validate(state["message"]).as_(bot)
+            await on_manual(original, bot)
+        return
+    if not state.get("ref"):
+        return
+    if parts[1] == "choose":
+        offset = int(parts[3]) if len(parts) == 4 and parts[3].isdigit() else 0
+        channels = await db.fetch_all("SELECT id,title,username FROM channels WHERE owner_id=? ORDER BY id LIMIT 21 OFFSET ?", (callback.from_user.id, offset))
+        if not channels:
+            await callback.message.answer("Сначала добавьте свой канал в панели.")
+            return
+        buttons = [[InlineKeyboardButton(text=c['title'] or c['username'] or str(c['id']), callback_data=f"src:add:{parts[2]}:{c['id']}")] for c in channels[:20]]
+        if len(channels) > 20:
+            buttons.append([InlineKeyboardButton(text="Следующие каналы →", callback_data=f"src:choose:{parts[2]}:{offset + 20}")])
+        if offset:
+            buttons.append([InlineKeyboardButton(text="← Назад", callback_data=f"src:choose:{parts[2]}:{max(0, offset - 20)}")])
+        await callback.message.edit_text(f"Куда добавить @{state['ref']}?", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    elif parts[1] == "add" and len(parts) == 4 and parts[3].isdigit():
+        from app.sources.manage import add_forward_source
+        try:
+            async with httpx.AsyncClient() as client:
+                _, title = await telegram_web.fetch(client, state['ref'])
+            added = await add_forward_source(callback.from_user.id, int(parts[3]), state['ref'], title or state['title'])
+        except PermissionError:
+            await callback.message.answer("Канал недоступен. Выберите свой канал.")
+            return
+        except Exception:
+            log.exception("forward source failed")
+            await callback.message.answer("Не удалось проверить источник. Попробуйте ещё раз позже.")
+            return
+        await callback.message.answer("Источник добавлен." if added else "Этот источник уже есть в канале.")
 
 
 @router.message((F.photo | F.video), F.caption)

@@ -430,3 +430,13 @@ body.tour-open { overflow:hidden; }
   .demo-verify small { width:100%; text-align:center; }.demo-check { padding:2px 0; }
   .tour-tip { margin-top:12px; }.tour-copy h2 { font-size:24px; }
 }
+
+/* Source picker: long feed URLs wrap within narrow Telegram webviews. */
+#copySourcesPanel select { width:100%; margin:10px 0; }
+#copySourceList { max-height:320px; overflow-y:auto; margin-bottom:14px; }
+.copy-source { display:flex; align-items:center; gap:12px; padding:12px 0; cursor:pointer; }
+.copy-source input { width:20px; height:20px; flex:0 0 20px; }
+.copy-source span { min-width:0; overflow-wrap:anywhere; }
+.copy-source small { display:block; opacity:.65; margin-top:4px; }
+
+.copy-content { padding:0 16px 16px; }
