@@ -19,6 +19,7 @@ let saveQueue = Promise.resolve();
 let savingCount = 0;
 const revisions = {};
 let feedView = 'pending';
+let adsView = 'active';
 let publishingNow = false;
 const drafts = new Map();
 const readTicket = (key) => { const token = (revisions[key] || 0) + 1; revisions[key] = token; const id = channel?.id; return () => channel?.id === id && revisions[key] === token; };
@@ -182,7 +183,7 @@ async function loadFeed() {
           ${post.url ? `<a href="${esc(safeLink(post.url))}" target="_blank" rel="noopener noreferrer">${icon('link')}оригинал</a>` : ''}
         </header>
         ${photo ? `<img src="${esc(photo.url)}" loading="lazy" alt="">` : ''}
-        ${attached}${warn}
+        ${attached}${warn}${post.reason ? `<p class="note warn">${esc(post.reason)}</p>` : ''}
         <div class="text">${esc(post.text_out || post.raw_text)}</div>
         <div class="acts">
           <button class="ok" data-act="approve" ${post.text_out?.trim() ? '' : 'disabled title="Нет готового текста"'}>${icon('check')} Опубликовать</button>
@@ -216,7 +217,7 @@ $('#feed').addEventListener('click', async (event) => {
   } catch (error) {
     toast(error.message, true);
   } finally {
-    $$('.post .acts button').forEach((b) => (b.disabled = false));
+    $$('.post .acts button').forEach((b) => (b.disabled = b.dataset.act === 'approve' && b.hasAttribute('title')));
   }
 });
 
@@ -225,12 +226,12 @@ $('#feed').addEventListener('click', async (event) => {
 async function loadAds() {
   if (!channel) return;
   const current = readTicket('ads');
-  const offers = await api(`/channels/${channel.id}/ads`);
+  const offers = await api(`/channels/${channel.id}/ads?view=${adsView}`);
   if (!current()) return;
   $('#adsCount').textContent = offers.length;
-  setBadge('#adsBadge', offers.filter((o) => o.status === 'new').length);
+  if (adsView === 'active') setBadge('#adsBadge', offers.filter((o) => o.status === 'new').length);
   if (!offers.length) {
-    $('#ads').innerHTML = '<p class="empty-note">Пока никого. Как только бот отсеет рекламу из источников, она появится здесь.</p>';
+    $('#ads').innerHTML = `<p class="empty-note">${adsView === 'archive' ? 'Архив пуст. Здесь появятся убранные материалы и ошибочные срабатывания.' : 'Нет материалов на разбор. Здесь появится возможная реклама из источников.'}</p>`;
     return;
   }
   $('#ads').innerHTML = offers
@@ -247,11 +248,14 @@ async function loadAds() {
         </header>
         <p class="note">${icon('sources')}<span>${esc(offer.source_title || 'источник')}${offer.url ? ` · <a href="${esc(safeLink(offer.url))}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">оригинал</a>` : ''}</span></p>
         ${contacts ? `<div class="contacts">${contacts}</div>` : '<p class="note">Контактов в тексте нет — смотрите оригинал.</p>'}
+        <details class="ad-reasons"><summary>Почему материал попал сюда</summary><p>${esc((offer.reasons || []).join(' · ') || 'Причина не сохранена для старой записи')}</p></details>
+        ${offer.status === 'false_positive' ? '<p class="note">Вы отметили: это не реклама</p>' : ''}
         <div class="excerpt">${esc(offer.raw_text)}</div>
         <div class="acts">
-          <button class="${offer.status === 'contacted' ? '' : 'ok'}" data-act="${offer.status === 'contacted' ? 'new' : 'contacted'}">
-            ${offer.status === 'contacted' ? 'Вернуть в работу' : 'Связался'}</button>
-          <button class="no" data-act="archived">${icon('trash')}</button>
+          ${adsView === 'archive' ? '<button data-act="new">Вернуть на разбор</button>' : `
+          <button data-act="${offer.status === 'contacted' ? 'new' : 'contacted'}">${offer.status === 'contacted' ? 'Не связывался' : 'Связался'}</button>
+          <button data-act="false_positive">Это не реклама</button>
+          <button data-act="archived" aria-label="Убрать в архив">${icon('inbox')}</button>`}
         </div>
       </article>`;
     })
@@ -261,12 +265,17 @@ async function loadAds() {
 $('#ads').addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-act]');
   if (!button) return;
-  const { id } = button.closest('.ad').dataset;
+  const card = button.closest('.ad');
+  const { id } = card.dataset;
+  card.querySelectorAll('button').forEach(b => b.disabled = true);
   try {
     await api(`/ads/${id}/${button.dataset.act}`, { method: 'POST' });
-    loadAds();
+    await loadAds();
+    toast(button.dataset.act === 'false_positive' ? 'Отмечено как ошибка. Материал доступен в архиве.' : 'Статус обновлён');
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    card.querySelectorAll('button').forEach(b => b.disabled = false);
   }
 });
 
@@ -295,7 +304,7 @@ $('#sources').addEventListener('click', async (event) => {
   if (!button) return;
   try {
     await api(`/sources/${button.dataset.id}`, { method: 'DELETE' });
-    loadSources();
+    await loadSources();
   } catch (error) {
     toast(error.message, true);
   }
@@ -309,7 +318,7 @@ $('#addSource').addEventListener('click', async () => {
   try {
     await api(`/channels/${channel.id}/sources`, { method: 'POST', body: JSON.stringify({ ref: input.value.trim() }) });
     input.value = '';
-    loadSources();
+    await loadSources();
     toast('Источник добавлен');
   } catch (error) {
     toast(error.message, true);
@@ -527,7 +536,7 @@ $('#promoList').addEventListener('click', async (event) => {
   if (!(await ask(`Удалить код ${drop.dataset.drop}?`))) return;
   try {
     await api(`/admin/promo/${drop.dataset.drop}`, { method: 'DELETE' });
-    loadPromoCodes();
+    await loadPromoCodes();
   } catch (error) {
     toast(error.message, true);
   }
@@ -546,7 +555,7 @@ $('#promoCreate').addEventListener('click', async () => {
     });
     $('#promoNote').value = '';
     toast(`Выпущено кодов: ${result.codes.length}`);
-    loadPromoCodes();
+    await loadPromoCodes();
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -837,4 +846,14 @@ function switchFeed(view) {
 }
 $('#showPending').onclick = () => switchFeed('pending');
 $('#showHistory').onclick = () => switchFeed('history');
+async function switchAds(view) {
+  adsView = view;
+  revisions.ads = (revisions.ads || 0) + 1;
+  $('#ads').innerHTML = '<p class="empty-note" role="status">Загружаем материалы…</p>';
+  $('#adsActive').classList.toggle('on', view === 'active');
+  $('#adsArchive').classList.toggle('on', view === 'archive');
+  try { await loadAds(); } catch (error) { $('#ads').innerHTML = '<p class="empty-note">Не удалось загрузить материалы. Нажмите вкладку, чтобы повторить.</p>'; toast(error.message, true); }
+}
+$('#adsActive').onclick = () => switchAds('active');
+$('#adsArchive').onclick = () => switchAds('archive');
 start();

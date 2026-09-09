@@ -252,6 +252,9 @@ async def on_manual(message: Message, bot: Bot) -> None:
             db.utcnow(),
         ),
     )
+    if result.needs_review:
+        await db.execute("UPDATE posts SET reason = ? WHERE id = ?",
+                         ("Возможная реклама: требуется ручная проверка", post_id))
     if result.ai_requests:
         await db.bump_stat(channel["id"], db.utcnow().date(), "ai_requests", result.ai_requests)
 
@@ -343,7 +346,7 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
             return await callback.message.answer(f"Нейросеть недоступна: {exc}")
         if not result.ok:
             return await callback.message.answer(f"Не прошло проверку: {result.reason}")
-        if not await publisher.replace_draft(post, result.text, result.fact_check):
+        if not await publisher.replace_draft(post, result.text, result.fact_check, needs_review=result.needs_review):
             return await callback.message.answer("Пост уже изменён или опубликован. Обновите ленту.")
         post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post_id,))
         return await callback.message.edit_text(

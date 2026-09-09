@@ -212,11 +212,13 @@ async def reject_post(post_id: int) -> bool:
     ))
 
 
-async def replace_draft(post: dict, text: str, fact_check) -> bool:
+async def replace_draft(post: dict, text: str, fact_check, *, needs_review: bool = False) -> bool:
     """Optimistic version check: never modify a sent post or overwrite a newer edit."""
     return bool(await db.update(
-        "UPDATE posts SET text_out=?, fact_check=? WHERE id=? "
+        "UPDATE posts SET text_out=?, fact_check=?, "
+        "status=CASE WHEN ? THEN 'pending' ELSE status END, "
+        "reason=CASE WHEN ? THEN 'Возможная реклама: требуется ручная проверка' ELSE reason END WHERE id=? "
         "AND status IN ('pending','approved','digest','failed') "
         "AND text_out IS NOT DISTINCT FROM ?",
-        (text, json.dumps(fact_check, ensure_ascii=False) if fact_check else None, post['id'], post['text_out']),
+        (text, json.dumps(fact_check, ensure_ascii=False) if fact_check else None, needs_review, needs_review, post['id'], post['text_out']),
     ))

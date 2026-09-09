@@ -228,17 +228,20 @@ async def process_post(bot: Bot, post: dict, channel: dict) -> None:
             await adbook.record(post, result.ad_score, result.ad_reasons)
         return await _reject(post, "filtered", result.reason or "не прошёл проверку", "filtered")
 
+    if result.needs_review:
+        await db.execute("UPDATE posts SET reason = ? WHERE id = ?",
+                         ("Не удалось уверенно исключить рекламу. Требуется ручная проверка.", post["id"]))
     fact_check = json.dumps(result.fact_check, ensure_ascii=False) if result.fact_check else None
     short = len(result.text or "") <= DIGEST_MAX_LEN
 
-    if channel["digest_enabled"] and short and not post["is_manual"]:
+    if channel["digest_enabled"] and short and not post["is_manual"] and not result.needs_review:
         await db.execute(
             "UPDATE posts SET status = 'digest', text_out = ?, fact_check = ? WHERE id = ?",
             (result.text, fact_check, post["id"]),
         )
         return
 
-    if channel["autopost"]:
+    if channel["autopost"] and not result.needs_review:
         publish_at = await _plan_publish_at(channel)
         await db.execute(
             "UPDATE posts SET status = 'approved', text_out = ?, fact_check = ?, publish_at = ? WHERE id = ?",

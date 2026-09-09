@@ -16,6 +16,7 @@ class Result:
     fact_check: Optional[dict] = None
     ai_requests: int = 0
     warnings: list[str] = field(default_factory=list)
+    needs_review: bool = False
     is_ad: bool = False
     ad_score: int = 0
     ad_reasons: list[str] = field(default_factory=list)
@@ -35,16 +36,16 @@ async def process(
         return Result(False, reason="слишком короткий текст")
 
     score, ad_reasons = ad_score(raw_text)
-    if score >= AD_THRESHOLD:
-        return Result(
-            False,
-            reason=f"реклама: {', '.join(ad_reasons[:2])}",
-            is_ad=True,
-            ad_score=score,
-            ad_reasons=ad_reasons,
-        )
-
     calls = 0
+    needs_review = False
+    confirmed = None
+    if score >= AD_THRESHOLD:
+        confirmed = await _confirm_ad(raw_text, api_key)
+        calls += 1
+        if confirmed and confirmed['decision'] == 'ad':
+            return Result(False, reason='реклама: ' + confirmed['reason'], is_ad=True,
+                          ad_score=score, ad_reasons=[confirmed['reason'], confirmed['evidence']], ai_requests=calls)
+        needs_review = confirmed is None or confirmed['decision'] == 'uncertain'
 
     if quality in ("balanced", "super"):
         try:
@@ -58,14 +59,14 @@ async def process(
             if any(type(triage.get(key)) is not bool for key in ("is_ad", "is_offtopic", "is_newsworthy")):
                 raise gemini.AIError("некорректная структура триажа")
             if triage.get("is_ad"):
-                return Result(
-                    False,
-                    reason=f"реклама (ИИ): {triage.get('reason', '')}",
-                    ai_requests=calls,
-                    is_ad=True,
-                    ad_score=max(score, AD_THRESHOLD),
-                    ad_reasons=ad_reasons + [str(triage.get("reason", "определено нейросетью"))],
-                )
+                if confirmed is None:
+                    confirmed = await _confirm_ad(raw_text, api_key)
+                    calls += 1
+                if confirmed and confirmed['decision'] == 'ad':
+                    return Result(False, reason='реклама (проверено): ' + confirmed['reason'],
+                                  ai_requests=calls, is_ad=True, ad_score=max(score, AD_THRESHOLD),
+                                  ad_reasons=[confirmed['reason'], confirmed['evidence']])
+                needs_review = confirmed is None or confirmed['decision'] == 'uncertain'
             if triage.get("is_offtopic"):
                 return Result(False, reason=f"оффтоп: {triage.get('reason', '')}", ai_requests=calls)
             if triage.get("is_newsworthy") is False:
@@ -88,7 +89,7 @@ async def process(
     rewritten = rewritten.strip()
 
     if quality != "super":
-        return Result(True, text=rewritten, ai_requests=calls)
+        return Result(True, text=rewritten, ai_requests=calls, needs_review=needs_review)
 
     check = await _factcheck(text, rewritten, api_key)
     calls += 1
@@ -112,7 +113,7 @@ async def process(
         recheck = await _factcheck(text, retry.strip(), api_key)
         calls += 1
         if recheck is not None and recheck.get("ok"):
-            return Result(True, text=retry.strip(), fact_check=recheck, ai_requests=calls)
+            return Result(True, text=retry.strip(), fact_check=recheck, ai_requests=calls, needs_review=needs_review)
         issues = (check.get("hallucinations") or []) + (check.get("distortions") or [])
         return Result(
             False,
@@ -121,7 +122,7 @@ async def process(
             ai_requests=calls,
         )
 
-    return Result(True, text=rewritten, fact_check=check, ai_requests=calls)
+    return Result(True, text=rewritten, fact_check=check, ai_requests=calls, needs_review=needs_review)
 
 
 async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> Optional[dict]:
@@ -172,3 +173,21 @@ async def make_digest(
             temperature=0.5,
         )
     ).strip()
+
+
+async def _confirm_ad(raw_text: str, api_key: Optional[str]) -> Optional[dict]:
+    try:
+        verdict = await gemini.generate_json(prompts.ad_confirmation_prompt(raw_text), api_key=api_key,
+                                             system=prompts.TRIAGE_SYSTEM, temperature=0.1)
+        if (verdict.get('decision') not in ('ad', 'not_ad', 'uncertain')
+                or not isinstance(verdict.get('reason'), str) or not verdict['reason'].strip()):
+            return None
+        if verdict['decision'] == 'ad':
+            evidence = verdict.get('evidence')
+            if not isinstance(evidence, str) or len(evidence.strip()) < 8 or evidence not in raw_text[:8000]:
+                return None
+        return verdict
+    except gemini.NoKeyError:
+        raise
+    except gemini.AIError:
+        return None

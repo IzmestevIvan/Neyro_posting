@@ -1,9 +1,4 @@
-"""Archive of posts rejected as advertising.
-
-An ad that keeps showing up in your sources is a live advertiser already paying for reach
-in your niche. Instead of dropping such posts silently, they are collected here with
-whatever contact details they carry, so the channel owner can approach the buyer directly.
-"""
+"""Archive of suspected promotional material; classification is not proof of payment."""
 
 import json
 import re
@@ -59,10 +54,14 @@ async def record(post: dict, score: int, reasons: list[str]) -> Optional[int]:
     prints = fingerprint(text)
     mine = set(prints.split())
     known = await db.fetch_all(
-        "SELECT id, fingerprint FROM ad_offers WHERE channel_id = ? ORDER BY id DESC LIMIT 200",
+        "SELECT id, fingerprint, status FROM ad_offers WHERE channel_id = ? ORDER BY id DESC LIMIT 200",
         (post["channel_id"],),
     )
     for row in known:
+        if row['status'] == 'false_positive':
+            if row['fingerprint'] == prints:
+                return row['id']
+            continue
         if row["fingerprint"] and jaccard(mine, set(row["fingerprint"].split())) >= SIMILAR:
             await db.execute(
                 "UPDATE ad_offers SET seen_count = seen_count + 1, last_seen_at = ? WHERE id = ?",

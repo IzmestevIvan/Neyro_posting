@@ -31,6 +31,8 @@ def card_text(post: dict, channel: dict) -> str:
 
     body = html.escape((post.get("text_out") or post.get("raw_text") or "")[:PREVIEW_LIMIT])
     parts = [header, "", body]
+    if post.get("reason"):
+        parts += ["", html.escape(post["reason"][:300])]
 
     media = json.loads(post.get("media") or "[]")
     marks = []

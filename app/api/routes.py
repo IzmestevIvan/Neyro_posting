@@ -281,7 +281,7 @@ async def _system_health() -> dict:
 async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
     await owned_channel(channel_id, user)
     rows = await db.fetch_all(
-        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, created_at "
+        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, reason, created_at "
         "FROM posts WHERE channel_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 30",
         (channel_id,),
     )
@@ -335,7 +335,7 @@ async def post_action(
             raise HTTPException(502, str(exc)) from exc
         if not result.ok:
             raise HTTPException(400, result.reason or "не прошло проверку")
-        if not await publisher.replace_draft(post, result.text, result.fact_check):
+        if not await publisher.replace_draft(post, result.text, result.fact_check, needs_review=result.needs_review):
             raise HTTPException(409, "пост уже изменён или опубликован; обновите ленту")
         return {"ok": True, "text": result.text}
 
@@ -432,10 +432,13 @@ async def delete_source(source_id: int, user: dict = Depends(active_user)) -> di
 
 
 @router.get("/channels/{channel_id}/ads")
-async def list_ads(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
+async def list_ads(channel_id: int, user: dict = Depends(active_user), view: str = "active") -> list[dict]:
     await owned_channel(channel_id, user)
+    if view not in ("active", "archive"):
+        raise HTTPException(422, "неизвестный раздел рекламы")
+    condition = "status IN ('archived', 'false_positive')" if view == "archive" else "status IN ('new', 'contacted')"
     rows = await db.fetch_all(
-        "SELECT * FROM ad_offers WHERE channel_id = ? AND status != 'archived' "
+        f"SELECT * FROM ad_offers WHERE channel_id = ? AND {condition} "
         "ORDER BY seen_count DESC, last_seen_at DESC LIMIT 100",
         (channel_id,),
     )
@@ -447,7 +450,7 @@ async def list_ads(channel_id: int, user: dict = Depends(active_user)) -> list[d
 
 @router.post("/ads/{ad_id}/{status}")
 async def set_ad_status(ad_id: int, status: str, user: dict = Depends(active_user)) -> dict:
-    if status not in ("new", "contacted", "archived"):
+    if status not in ("new", "contacted", "archived", "false_positive"):
         raise HTTPException(400, "неизвестный статус")
     offer = await db.fetch_one("SELECT * FROM ad_offers WHERE id = ?", (ad_id,))
     if not offer:
