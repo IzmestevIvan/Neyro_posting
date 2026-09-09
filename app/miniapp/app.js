@@ -773,21 +773,24 @@ function setupTour() {
     next.textContent = index === slides.length - 1 ? 'Начать' : 'Дальше';
   }
 
-  track.addEventListener('scroll', () => {
+  track.onscroll = () => {
     const at = Math.round(track.scrollLeft / track.clientWidth);
     if (at !== index) show(at);
-  }, { passive: true });
+  };
 
-  next.addEventListener('click', () => {
+  next.onclick = () => {
     if (index === slides.length - 1) return closeTour();
     track.scrollTo({ left: (index + 1) * track.clientWidth, behavior: 'smooth' });
     show(index + 1);
-  });
+  };
 
-  $('#tourSkip').addEventListener('click', closeTour);
-  show(0);
+  $('#tourSkip').onclick = closeTour;
   $('#tour').hidden = false;
+  track.scrollTo({ left: 0, behavior: 'instant' });
+  show(0);
 }
+
+$('#replayTour').addEventListener('click', setupTour);
 
 /* ---------- start ---------- */
 
