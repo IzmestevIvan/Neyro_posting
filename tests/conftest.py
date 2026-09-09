@@ -8,7 +8,7 @@ from tests.db_safety import validate_test_url
 TEST_URL = validate_test_url(os.getenv("TEST_DATABASE_URL", "postgresql://neyro:neyro@localhost:5432/neyro_test"))
 os.environ["DATABASE_URL"] = TEST_URL
 
-TABLES = ("posts", "ad_offers", "sources", "stats_daily", "channels", "promo_codes", "users", "kv")
+TABLES = ("delivery_attempts", "posts", "ad_offers", "sources", "stats_daily", "channels", "promo_codes", "users", "kv")
 
 
 @pytest_asyncio.fixture

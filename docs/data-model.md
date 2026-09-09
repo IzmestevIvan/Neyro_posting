@@ -179,3 +179,8 @@ docker compose exec -T app python -m scripts.sqlite_to_pg /app/data/legacy.db
 **Важно про снимок SQLite.** В режиме WAL файл `neyro.db` может быть почти пустым: данные
 лежат в `neyro.db-wal`. Простое копирование `.db` теряет всё. Корректный снимок —
 `VACUUM INTO 'copy.db'` либо `.backup`.
+
+
+## Дополнение 2026-09-09: delivery_attempts
+
+Журнал каждой попытки отправки: id, post_id (SET NULL при удалении), channel_id (SET NULL), owner_id (CASCADE при удалении пользователя), worker_id, started_at, finished_at, status, receipts JSONB, error_type. Он участвует в резервировании квоты и сохраняется при очистке постов/каналов. Поля FK обнуляются, квота владельца остаётся учтённой. Новые состояния posts: uncertain, partial, digest_item. Протокол и допустимые переходы описаны в [delivery.md](delivery.md).

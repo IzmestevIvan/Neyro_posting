@@ -830,13 +830,13 @@ async function start() {
 }
 
 $('#nextStep').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });
-const HISTORY_LABELS = { published: 'Опубликован', failed: 'Ошибка публикации', filtered: 'Отфильтрован', duplicate: 'Дубликат', rejected: 'Отклонён', approved: 'В очереди', new: 'Обрабатывается', digest: 'В дайджесте', publishing: 'Отправляется' };
+const HISTORY_LABELS = { published: 'Опубликован', failed: 'Ошибка публикации', filtered: 'Отфильтрован', duplicate: 'Дубликат', rejected: 'Отклонён', approved: 'В очереди', new: 'Обрабатывается', digest: 'В дайджесте', publishing: 'Отправляется', uncertain: 'Нужна сверка с каналом', partial: 'Отправлена только часть', digest_item: 'Включён в дайджест' };
 async function loadHistory() {
   if (!channel) return;
   const current = readTicket('history');
   const rows = await api(`/channels/${channel.id}/history`);
   if (!current()) return;
-  $('#history').innerHTML = rows.length ? '<p class="hint">Последние 50 событий обработки.</p>' + rows.map(row => `<article class="post history-item"><header><span>${esc(row.source_title || 'Ручной пост')}</span><span class="tag">${esc(HISTORY_LABELS[row.status] || row.status)}</span></header><p>${esc(row.preview)}</p>${row.reason ? `<p class="hint">${esc(row.reason)}</p>` : ''}<span class="hint">${esc(ago(row.published_at || row.created_at))}</span></article>`).join('') : '<div class="empty-note">Здесь будет история обработки и публикаций.</div>';
+  $('#history').innerHTML = rows.length ? '<p class="hint">Последние 50 событий обработки.</p>' + rows.map(row => `<article class="post history-item"><header><span>${esc(row.source_title || 'Ручной пост')}</span><span class="tag">${esc(HISTORY_LABELS[row.status] || row.status)}</span></header><p>${esc(row.preview)}</p>${row.reason ? `<p class="hint">${esc(row.reason)}</p>` : ''}${row.delivery_receipts?.length ? `<p class="hint">Telegram подтвердил сообщения: ${esc(row.delivery_receipts.flatMap(step => step.message_ids).map(id => '#' + id).join(', '))}</p>` : ''}<span class="hint">${esc(ago(row.published_at || row.created_at))}</span>${['partial','uncertain'].includes(row.status) ? `<div class="acts"><button data-reconcile="confirm_sent" data-id="${row.id}">Проверено: пост опубликован полностью</button>${row.status === 'uncertain' ? `<button data-reconcile="confirm_absent" data-id="${row.id}">Проверено: в канале ничего нет</button>` : ''}</div>` : ''}</article>`).join('') : '<div class="empty-note">Здесь будет история обработки и публикаций.</div>';
 }
 function switchFeed(view) {
   feedView = view;
@@ -856,4 +856,18 @@ async function switchAds(view) {
 }
 $('#adsActive').onclick = () => switchAds('active');
 $('#adsArchive').onclick = () => switchAds('archive');
+$('#history').addEventListener('click', async event => {
+  const button = event.target.closest('[data-reconcile]');
+  if (!button) return;
+  const action = button.dataset.reconcile;
+  const question = action === 'confirm_sent' ? 'Вы проверили канал и видите весь пост, включая текст и медиа? Это отметит публикацию завершённой.' : 'Вы проверили канал и убедились, что ни текст, ни медиа не появились? Пост вернётся на ручную проверку. Сейчас ничего не отправится.';
+  if (!(await ask(question))) return;
+  button.disabled = true;
+  try {
+    await api(`/posts/${button.dataset.id}/${action}`, {method:'POST'});
+    await loadHistory();
+    toast('Результат сверки сохранён');
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
 start();

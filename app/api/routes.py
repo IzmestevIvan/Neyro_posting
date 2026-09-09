@@ -294,12 +294,17 @@ async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> li
 @router.get("/channels/{channel_id}/history")
 async def channel_history(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
     await owned_channel(channel_id, user)
-    return await db.fetch_all(
+    rows = await db.fetch_all(
         "SELECT id, status, reason, source_title, substr(COALESCE(text_out, raw_text), 1, 200) AS preview, "
-        "created_at, published_at FROM posts WHERE channel_id = ? AND status != 'pending' "
+        "created_at, published_at, (SELECT receipts FROM delivery_attempts d WHERE d.post_id=posts.id ORDER BY d.id DESC LIMIT 1) AS delivery_receipts FROM posts WHERE channel_id = ? AND status != 'pending' "
         "ORDER BY id DESC LIMIT 50",
         (channel_id,),
     )
+
+    for row in rows:
+        value = row['delivery_receipts']
+        row['delivery_receipts'] = json.loads(value) if isinstance(value, str) else (value or [])
+    return rows
 
 
 @router.post("/posts/{post_id}/{action}")
@@ -311,6 +316,13 @@ async def post_action(
         raise HTTPException(404, "пост не найден")
     channel = await owned_channel(post["channel_id"], user)
     bot = request.app.state.bot
+
+    if action in ("confirm_sent", "confirm_absent"):
+        try:
+            await publisher.reconcile_delivery(post_id, channel, delivered=action == "confirm_sent")
+        except publisher.AlreadyPublished as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"ok": True}
 
     if action == "reject":
         if not await publisher.reject_post(post_id):
@@ -344,6 +356,10 @@ async def post_action(
             raise HTTPException(429, "исчерпан дневной лимит")
         try:
             await publisher.publish_post(bot, post, channel)
+        except publisher.QuotaExceeded as exc:
+            raise HTTPException(429, str(exc)) from exc
+        except publisher.DeliveryUncertain as exc:
+            raise HTTPException(409, str(exc)) from exc
         except publisher.AlreadyPublished as exc:
             raise HTTPException(409, str(exc)) from exc
         except Exception as exc:
@@ -373,6 +389,10 @@ async def publish_now(
         raise HTTPException(429, "исчерпан дневной лимит")
     try:
         await publisher.publish_post(request.app.state.bot, post, channel)
+    except publisher.QuotaExceeded as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except publisher.DeliveryUncertain as exc:
+        raise HTTPException(409, str(exc)) from exc
     except publisher.AlreadyPublished as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:

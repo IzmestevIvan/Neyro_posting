@@ -1,4 +1,6 @@
 import pytest
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import SendMessage
 
 from app.core import publisher, scheduler
 
@@ -17,13 +19,13 @@ class FakeBot:
 
     async def send_message(self, chat_id, text, **kw):
         if self.fail:
-            raise RuntimeError("Telegram недоступен")
+            raise TelegramBadRequest(method=SendMessage(chat_id=chat_id, text="test"), message="Telegram отклонил запрос")
         self.sent.append({"chat": chat_id, "text": text, **kw})
         return FakeMessage(len(self.sent))
 
     async def send_photo(self, chat_id, photo, caption=None, **kw):
         if self.fail:
-            raise RuntimeError("Telegram недоступен")
+            raise TelegramBadRequest(method=SendMessage(chat_id=chat_id, text="test"), message="Telegram отклонил запрос")
         self.sent.append({"chat": chat_id, "photo": photo, "caption": caption})
         return FakeMessage(len(self.sent))
 
@@ -73,7 +75,7 @@ async def test_failed_send_keeps_post_queued_and_counts_attempt(store, channel):
     bot = FakeBot(fail=True)
     post = await make_post(store, channel)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TelegramBadRequest):
         await publisher.publish_post(bot, post, channel)
 
     fresh = await store.fetch_one("SELECT * FROM posts WHERE id = ?", (post["id"],))
@@ -88,7 +90,7 @@ async def test_post_gives_up_after_max_attempts(store, channel):
     post = await make_post(store, channel)
     for _ in range(publisher.MAX_ATTEMPTS):
         post = await store.fetch_one("SELECT * FROM posts WHERE id = ?", (post["id"],))
-        with pytest.raises(RuntimeError):
+        with pytest.raises(TelegramBadRequest):
             await publisher.publish_post(bot, post, channel)
 
     fresh = await store.fetch_one("SELECT * FROM posts WHERE id = ?", (post["id"],))

@@ -258,6 +258,7 @@ async def process_post(bot: Bot, post: dict, channel: dict) -> None:
 
 
 async def publish_due(bot: Bot) -> None:
+    await publisher.recover_stale_deliveries()
     rows = await db.fetch_all(
         "SELECT p.*, c.owner_id FROM posts p JOIN channels c ON c.id = p.channel_id "
         "WHERE p.status = 'approved' AND c.paused = 0 "
@@ -292,7 +293,20 @@ async def run_digest(bot: Bot, channel: dict) -> None:
     )
     if not rows:
         return
-    texts = [r["text_out"] for r in rows if r["text_out"]]
+    # Keep every original inside the verifier's 5000-character input limit.
+    selected, original_size = [], 0
+    for row in rows:
+        original = row['raw_text'] or ''
+        if row['text_out'] and original and original_size + len(original) + 2 <= 5000:
+            selected.append(row)
+            original_size += len(original) + 2
+        if len(selected) == 5:
+            break
+    rows = selected
+    if not rows:
+        return
+    originals = "\n\n".join(r['raw_text'] for r in rows)
+    texts = [r['text_out'] for r in rows]
     try:
         summary = await pipeline.make_digest(
             texts, channel["instructions"], channel["lang"], channel["gemini_key"] or None
@@ -301,21 +315,36 @@ async def run_digest(bot: Bot, channel: dict) -> None:
         log.warning("digest failed: %s", exc)
         return
 
-    if not await access.owner_has_access(channel["owner_id"]):
+    # A digest is one publication, not N independently published source rows.
+    check = await pipeline._factcheck(originals, summary, channel['gemini_key'] or None)
+    if not check or not check['ok']:
         return
-    message = await publisher.publish(bot, channel, summary, [])
+    if not await access.owner_has_access(channel['owner_id']):
+        return
     now = now_utc()
-    ids = [r["id"] for r in rows]
-    await db.execute(
-        "UPDATE posts SET status = 'published', message_id = ?, published_at = ? "
-        f"WHERE id IN ({','.join('?' * len(ids))})",
-        (message.message_id, now, *ids),
-    )
-    await db.bump_stat(channel["id"], now.date(), "published")
-    await db.execute(
-        "UPDATE channels SET digest_sent_on = ? WHERE id = ?",
-        (now.astimezone(channel_tz(channel)).date(), channel["id"]),
-    )
+    local_day = now.astimezone(channel_tz(channel)).date()
+    ids = [r['id'] for r in rows]
+    pool = await db.connect()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            fresh = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
+            if not fresh or fresh['paused'] or not fresh['autopost'] or fresh['digest_sent_on'] == local_day:
+                return
+            members = await conn.fetch('SELECT id,status FROM posts WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE', ids)
+            if len(members) != len(ids) or any(r['status'] != 'digest' for r in members):
+                return
+            digest = await conn.fetchrow(
+                "INSERT INTO posts (channel_id, uid, source_title, raw_text, text_out, fact_check, status, is_manual, created_at) "
+                "VALUES ($1,$2,'Дайджест',$3,$4,$5,'approved',1,now()) RETURNING *",
+                channel['id'], f'digest:{channel["id"]}:{local_day}', originals, summary, json.dumps(check, ensure_ascii=False))
+            await conn.execute("UPDATE posts SET status='digest_item', reason=$1 WHERE id=ANY($2::bigint[])",
+                               f'Включён в дайджест #{digest["id"]}', ids)
+            # Reserve this day's digest even if delivery must wait for quota/retry.
+            await conn.execute('UPDATE channels SET digest_sent_on=$1 WHERE id=$2', local_day, channel['id'])
+    try:
+        await publisher.publish_post(bot, dict(digest), dict(fresh))
+    except (publisher.QuotaExceeded, publisher.AlreadyPublished, publisher.DeliveryUncertain):
+        return
 
 
 async def digest_due(bot: Bot) -> None:

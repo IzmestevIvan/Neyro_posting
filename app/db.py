@@ -112,6 +112,21 @@ CREATE INDEX IF NOT EXISTS idx_posts_channel_status ON posts(channel_id, status)
 CREATE INDEX IF NOT EXISTS idx_posts_uid ON posts(channel_id, uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at);
 
+CREATE TABLE IF NOT EXISTS delivery_attempts (
+  id BIGSERIAL PRIMARY KEY,
+  post_id BIGINT REFERENCES posts(id) ON DELETE SET NULL,
+  channel_id BIGINT REFERENCES channels(id) ON DELETE SET NULL,
+  owner_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+  worker_id TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'sending',
+  receipts JSONB NOT NULL DEFAULT '[]',
+  error_type TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_post ON delivery_attempts(post_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_owner_time ON delivery_attempts(owner_id, started_at);
+
 CREATE TABLE IF NOT EXISTS ad_offers (
   id           BIGSERIAL PRIMARY KEY,
   channel_id   BIGINT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
