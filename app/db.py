@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS posts (
   attempts       INTEGER NOT NULL DEFAULT 0,
   is_manual      INTEGER NOT NULL DEFAULT 0,
   business_draft INTEGER NOT NULL DEFAULT 0,
+  business_generated INTEGER NOT NULL DEFAULT 0,
   created_at     TIMESTAMPTZ NOT NULL,
   published_at   TIMESTAMPTZ
 );
@@ -199,6 +200,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ('channels', 'business_profile', "TEXT NOT NULL DEFAULT '{}'"),
     ('channels', 'business_next_at', 'TIMESTAMPTZ'),
     ('posts', 'business_draft', 'INTEGER NOT NULL DEFAULT 0'),
+    ('posts', 'business_generated', 'INTEGER NOT NULL DEFAULT 0'),
     ('channels', 'watermark_position', "TEXT NOT NULL DEFAULT 'bottom-right'"),
     ("users", "max_channels", "INTEGER NOT NULL DEFAULT 1"),
     ("users", "access_until", "TIMESTAMPTZ"),
@@ -243,7 +245,12 @@ async def _apply_migrations(conn: asyncpg.Connection) -> None:
             column,
         )
         if not exists:
-            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            async with conn.transaction():
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+                if table == 'posts' and column == 'business_generated':
+                    # Only generated company drafts, not news imported for approval.
+                    await conn.execute("UPDATE posts SET business_generated=1 WHERE business_draft=1 "
+                        "AND is_manual=1 AND source_title='Редактор компании' AND source_id IS NULL AND uid IS NULL")
             log.info("миграция: добавлена колонка %s.%s", table, column)
 
 

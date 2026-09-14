@@ -33,7 +33,7 @@ async def test_generates_pending_without_sources(store, channel, monkeypatch):
     monkeypatch.setattr(gemini, 'generate_json', ai)
     result = await business.generate(channel['id'])
     post = await store.fetch_one('SELECT * FROM posts WHERE id=?',(result['post_id'],))
-    assert post['status']=='pending' and post['is_manual'] and post['business_draft']
+    assert post['status']=='pending' and post['is_manual'] and post['business_draft'] and post['business_generated']
     assert post['publish_at'] is None and post['text_out']==TEXT
     assert 'DOBRA' in ai.call_args.args[0]
     with pytest.raises(ValueError, match='минуту'):
@@ -69,7 +69,7 @@ async def test_five_pending_stops_generation(store, channel, monkeypatch):
     await enable(store, channel)
     for i in range(5):
         p = await make_post(store,channel,status='pending',text=f'{TEXT} {i}')
-        await store.execute('UPDATE posts SET business_draft=1 WHERE id=?',(p['id'],))
+        await store.execute('UPDATE posts SET business_draft=1,business_generated=1 WHERE id=?',(p['id'],))
     ai = AsyncMock()
     monkeypatch.setattr(gemini,'generate_json',ai)
     with pytest.raises(ValueError, match='Лимит'):
@@ -116,6 +116,38 @@ async def test_enabling_mode_moves_queue_to_review_and_disables_auto(store,chann
     assert updated['autopost']==0 and updated['digest_enabled']==0
     post = await store.fetch_one('SELECT * FROM posts')
     assert post['status']=='pending' and post['business_draft']==1
+    assert post['business_generated']==0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('automatic', [False, True])
+async def test_imported_news_do_not_consume_company_generation_limit(store,channel,monkeypatch,automatic):
+    for i in range(20):
+        await make_post(store,channel,status='approved',text=f'Старая новость {i}')
+    user = await store.fetch_one('SELECT * FROM users WHERE tg_id=1')
+    await update_channel(channel['id'],{'business_mode':True},user)
+    await enable(store,channel,automatic)
+    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'text':TEXT,'review':''}))
+    if automatic:
+        await business.propose_due()
+    else:
+        await business.generate(channel['id'])
+    rows = await store.fetch_all('SELECT status,business_generated FROM posts')
+    assert len(rows)==21 and sum(r['business_generated'] for r in rows)==1
+    assert all(r['status']=='pending' for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_rejected_generated_drafts_still_count_toward_daily_limit(store,channel,monkeypatch):
+    await enable(store,channel)
+    for i in range(5):
+        post = await make_post(store,channel,status='rejected',text=f'{TEXT} {i}')
+        await store.execute('UPDATE posts SET business_generated=1,business_draft=1 WHERE id=?',(post['id'],))
+    ai = AsyncMock()
+    monkeypatch.setattr(gemini,'generate_json',ai)
+    with pytest.raises(ValueError,match='24 часа'):
+        await business.generate(channel['id'])
+    ai.assert_not_called()
 
 
 @pytest.mark.asyncio

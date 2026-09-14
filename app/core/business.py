@@ -89,9 +89,11 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
             return None
         count = await db.fetch_one("SELECT count(*) FILTER(WHERE status='pending') AS pending, "
             "count(*) FILTER(WHERE created_at>now()-interval '24 hours') AS today "
-            "FROM posts WHERE channel_id=? AND business_draft=1", (channel_id,))
-        if count['pending'] >= 5 or count['today'] >= 5:
-            raise ValueError('Лимит черновиков: 5 в сутки и не больше 5 ожидающих согласования')
+            "FROM posts WHERE channel_id=? AND business_generated=1", (channel_id,))
+        if count['pending'] >= 5:
+            raise ValueError('Лимит: уже 5 черновиков компании ждут согласования. Во вкладке «Посты» опубликуйте или отклоните ненужные, затем повторите.')
+        if count['today'] >= 5:
+            raise ValueError('Лимит: редактор компании уже подготовил 5 постов за последние 24 часа. Новая генерация станет доступна по мере завершения этого периода.')
         # Failed provider calls are also throttled; no retry storm on a small server.
         last = await db.get_kv(f'business_attempt:{channel_id}')
         if last and db.utcnow().timestamp() - float(last) < 60:
@@ -111,8 +113,8 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
                 raise ValueError('Досье или режим изменились. Подготовьте черновик заново')
             if automatic and (not fresh['business_auto'] or fresh['paused']):
                 return None
-            post_id = await conn.fetchval("INSERT INTO posts(channel_id,source_title,raw_text,text_out,url,status,reason,is_manual,business_draft,fingerprint,created_at) "
-                "VALUES($1,'Редактор компании',$2,$3,$4,'pending',$5,1,1,$6,now()) RETURNING id",
+            post_id = await conn.fetchval("INSERT INTO posts(channel_id,source_title,raw_text,text_out,url,status,reason,is_manual,business_draft,business_generated,fingerprint,created_at) "
+                "VALUES($1,'Редактор компании',$2,$3,$4,'pending',$5,1,1,1,$6,now()) RETURNING id",
                 channel_id, brief, text, url, review, fp)
             await conn.execute('UPDATE channels SET business_next_at=$1 WHERE id=$2', db.utcnow()+timedelta(days=1), channel_id)
         await db.bump_stat(channel_id, db.utcnow().date(), 'ai_requests')
@@ -122,7 +124,7 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
 async def propose_due():
     rows = await db.fetch_all("SELECT id FROM channels c WHERE business_mode=1 AND business_auto=1 AND paused=0 "
         "AND (business_next_at IS NULL OR business_next_at<=now()) "
-        "AND (SELECT count(*) FROM posts p WHERE p.channel_id=c.id AND p.business_draft=1 AND p.status='pending')<5 "
+        "AND (SELECT count(*) FROM posts p WHERE p.channel_id=c.id AND p.business_generated=1 AND p.status='pending')<5 "
         "ORDER BY business_next_at NULLS FIRST,id LIMIT 2")
     for row in rows:
         try:
