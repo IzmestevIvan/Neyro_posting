@@ -107,6 +107,7 @@ async def bootstrap(request: Request, user: dict = Depends(current_user)) -> dic
     )
     return {
         "bot_username": request.app.state.bot_username,
+        "support_username": await db.get_kv('support_username'),
         "user": {
             "id": user["tg_id"],
             "first_name": user["first_name"],
@@ -354,7 +355,9 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
         "(SELECT COUNT(*) FROM channels WHERE paused = 0) AS active_channels, "
         "pg_database_size(current_database()) AS database_bytes"
     )
-    return {"system": await _system_health(), "queue": queue, "capacity": capacity}
+    from app.core.operations import recent_events
+    return {"system": await _system_health(), "queue": queue, "capacity": capacity,
+            "events": await asyncio.to_thread(recent_events)}
 
 
 @router.get("/channels/{channel_id}/feed")

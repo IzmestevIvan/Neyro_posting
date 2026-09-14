@@ -615,6 +615,7 @@ async function refreshAdminMonitoring() {
     const data = await api('/admin/monitoring');
     if (!adminOpen) return;
     renderSystem(data.system);
+    $('#adminEvents').innerHTML = (data.events || []).map(e => `<div class="card"><b>${e.emergency ? '🚨 ' : ''}${esc(e.title)}</b><p>${esc(e.explanation)}</p><p class="hint">${esc(e.channel?.title || 'Сервис')} · ${esc(new Date(e.time).toLocaleString('ru-RU'))}</p><details><summary>Технические детали</summary><p class="hint">${esc(e.detail)}</p></details></div>`).join('') || '<p class="hint">Событий пока нет.</p>';
     const c = data.capacity, q = data.queue;
     $('#adminMonitoring').innerHTML = [
       [c.users, 'пользователей'], [c.channels, 'каналов'],
@@ -1030,6 +1031,10 @@ async function start() {
 
   try {
     boot = await api('/bootstrap');
+    if (/^[A-Za-z0-9_]{5,32}$/.test(boot.support_username || '')) {
+      $('#supportLink').href = `https://t.me/${boot.support_username}`;
+      $('#supportLink').hidden = false;
+    }
   } catch (error) {
     $('#boot').innerHTML = `<div class="card hero"><h2>Не удалось открыть редакцию</h2><p class="muted">${esc(error.message)}</p><p>Откройте приложение через кнопку в Telegram-боте.</p><button class="accent" id="retryBoot">Попробовать снова</button></div>`;
     $('#retryBoot').onclick = start;

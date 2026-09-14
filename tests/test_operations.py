@@ -7,7 +7,7 @@ from app.core.operations import ErrorJournal, redact, channel_scope
 
 
 def event(text='Ошибка источника %s', arg='news'):
-    return logging.LogRecord('source', logging.WARNING, __file__, 12, text, (arg,), None)
+    return logging.LogRecord('source', logging.CRITICAL, __file__, 12, text, (arg,), None)
 
 
 @pytest.mark.asyncio
@@ -28,6 +28,25 @@ async def test_logs_every_repeat_and_groups_alerts(tmp_path):
         await journal.flush_alerts(bot)
         assert bot.send_message.await_count == 2
         assert not journal.pending
+    finally:
+        journal.close()
+
+
+@pytest.mark.asyncio
+async def test_warning_is_panel_only_and_delivery_is_emergency(tmp_path):
+    from app.core.operations import recent_events
+    journal = ErrorJournal(tmp_path/'errors.log', admins={1})
+    bot = AsyncMock()
+    try:
+        warning = logging.LogRecord('ai', logging.WARNING, __file__, 1, 'HTTP 429', (), None)
+        journal.handle(warning)
+        await journal.flush_alerts(bot)
+        bot.send_message.assert_not_awaited()
+        events = recent_events(tmp_path/'events.jsonl')
+        assert len(events) == 1 and not events[0]['emergency']
+        journal.handle(logging.LogRecord('operations.delivery', logging.ERROR, __file__, 2, 'Прерванная доставка', (), None))
+        await journal.flush_alerts(bot)
+        bot.send_message.assert_awaited_once()
     finally:
         journal.close()
 

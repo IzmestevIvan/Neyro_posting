@@ -1,12 +1,13 @@
 """Bounded, persistent error journal and grouped administrator notifications."""
 import asyncio
 import hashlib
+import json
 import html
 import logging
 import os
 import re
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from contextvars import ContextVar
@@ -14,7 +15,27 @@ from contextlib import contextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.config import ADMIN_IDS
+from app.config import ADMIN_IDS, ROOT
+
+EVENTS_PATH = ROOT / 'data/logs/events.jsonl'
+
+
+def recent_events(path=None):
+    path = path or EVENTS_PATH
+    rows = []
+    for candidate in (path.with_name(path.name + '.1'), path):
+        if not candidate.exists():
+            continue
+        with candidate.open('rb') as stream:
+            stream.seek(max(0, candidate.stat().st_size - 128 * 1024))
+            for line in stream.read().decode('utf-8', errors='replace').splitlines():
+                try:
+                    row = json.loads(line)
+                    if isinstance(row, dict):
+                        rows.append(row)
+                except ValueError:
+                    pass
+    return rows[-60:][::-1]
 
 _channel = ContextVar('error_channel', default=None)
 
@@ -84,6 +105,10 @@ class ErrorJournal(logging.Handler):
         self.disk = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=4, encoding='utf-8')
         path.chmod(0o600)
         self.disk.setFormatter(SafeFormatter('%(asctime)s %(levelname)s %(name)s:%(lineno)d %(message)s'))
+        self.events = RotatingFileHandler(path.with_name('events.jsonl'), maxBytes=1024*1024, backupCount=2, encoding='utf-8')
+        path.with_name('events.jsonl').chmod(0o600)
+        self.events.setFormatter(logging.Formatter('%(message)s'))
+        self.repeats = OrderedDict()
         self.pending = OrderedDict()
         self.last_sent = {}
         self.overflow = 0
@@ -93,7 +118,7 @@ class ErrorJournal(logging.Handler):
     def emit(self, record):
         # Disk receives every occurrence, even failures sending an alert itself.
         self.disk.emit(record)
-        if record.name == 'operations.delivery':
+        if record.name == 'operations.alert_transport':
             return
         context = _channel.get()
         # HTTP status/model must remain distinct: a later 429 cannot erase an earlier 503.
@@ -103,6 +128,23 @@ class ErrorJournal(logging.Handler):
         detail = redact(record.getMessage())[:500]
         if record.exc_info:
             detail += f' ({record.exc_info[0].__name__})'
+        now = time.monotonic()
+        repeated = self.repeats.setdefault(key, deque(maxlen=3))
+        repeated.append(now)
+        self.repeats.move_to_end(key)
+        while len(self.repeats) > 512:
+            self.repeats.popitem(last=False)
+        emergency = record.levelno >= logging.CRITICAL or record.name == 'operations.delivery'
+        if record.name in {'operations.ai', 'operations.process-loop', 'operations.publish-loop',
+                           'operations.poll-loop', 'operations.stats-loop', 'operations.support'}:
+            emergency = emergency or (len(repeated) == 3 and now-repeated[0] < 3600)
+        title, explanation = explain_error(detail, record.name)
+        event = {'title': title, 'explanation': explanation, 'detail': detail, 'channel': context,
+                 'emergency': emergency, 'time': datetime.now(ZoneInfo('Europe/Moscow')).isoformat()}
+        self.events.emit(logging.LogRecord('events', logging.INFO, '', 0,
+                         redact(json.dumps(event, ensure_ascii=False)), (), None))
+        if not emergency:
+            return
         if entry:
             entry['count'] += 1
             entry['detail'] = detail
@@ -120,10 +162,10 @@ class ErrorJournal(logging.Handler):
         now = time.monotonic()
         with self.lock:
             selected = [(key, value.copy()) for key, value in self.pending.items()
-                        if now - self.last_sent.get(key, -1000) >= 60][:4]
+                        if now - self.last_sent.get(key, -10000) >= 1800][:4]
         if not selected and not self.overflow:
             return
-        lines = ['⚠️ <b>Нейропостинг: состояние обработки</b>']
+        lines = ['🚨 <b>Нейропостинг: требуется вмешательство</b>']
         for key, event in selected:
             title, explanation = explain_error(event['detail'], event['where'])
             context = event.get('channel')
@@ -143,7 +185,7 @@ class ErrorJournal(logging.Handler):
                     results.append(True)
                 except Exception:
                     results.append(False)
-                    logging.getLogger('operations.delivery').warning('Не удалось доставить алерт администратору', exc_info=True)
+                    logging.getLogger('operations.alert_transport').warning('Не удалось доставить алерт администратору', exc_info=True)
             if all(results):
                 with self.lock:
                     for key, event in selected:
@@ -152,7 +194,7 @@ class ErrorJournal(logging.Handler):
                             del self.pending[key]
                         self.last_sent[key] = now
                     self.overflow -= overflow
-                    self.last_sent = {k: t for k, t in self.last_sent.items() if now-t < 60}
+                    self.last_sent = {k: t for k, t in self.last_sent.items() if now-t < 1800}
         finally:
             self.sending = False
 
@@ -163,6 +205,7 @@ class ErrorJournal(logging.Handler):
 
     def close(self):
         self.disk.close()
+        self.events.close()
         super().close()
 
 

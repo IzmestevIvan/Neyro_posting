@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .env
 .deploy.env
+.support.env
 .pytest_cache/
 .git/
 .gitignore

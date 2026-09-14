@@ -11,6 +11,14 @@ from app.config import DATABASE_URL, DEFAULT_DAILY_LIMIT
 log = logging.getLogger("db")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS support_routes (
+  admin_id BIGINT NOT NULL,
+  message_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(admin_id,message_id)
+);
+CREATE INDEX IF NOT EXISTS support_routes_created ON support_routes(created_at);
 CREATE TABLE IF NOT EXISTS service_api_keys (
   id BIGSERIAL PRIMARY KEY,
   label TEXT NOT NULL,

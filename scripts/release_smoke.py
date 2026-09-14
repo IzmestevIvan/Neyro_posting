@@ -54,6 +54,7 @@ async def main():
                     monitor.raise_for_status()
                     assert monitor.json()['system']['disk_total'] > 0
                     assert monitor.json()['capacity']['database_bytes'] > 0
+                    assert isinstance(monitor.json()['events'], list)
                 else:
                     assert keys.status_code == 403
                     assert monitor.status_code == 403

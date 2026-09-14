@@ -356,6 +356,7 @@
     </button>
   </section>
 
+  <a id="supportLink" class="ghost wide" hidden target="_blank" rel="noopener noreferrer">Написать в поддержку</a>
   <!-- админ -->
   <section id="page-admin" class="page" hidden>
     <div class="pagehead">
@@ -371,6 +372,9 @@
     <div id="adminMonitoring" class="grid"></div>
     <p class="hint">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</p>
 
+    <details class="card group"><summary>Журнал событий и предупреждений</summary>
+      <div id="adminEvents" class="body"></div>
+    </details>
     <h3 class="section">Ключи Gemini</h3>
     <div class="card">
       <p class="hint">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</p>
