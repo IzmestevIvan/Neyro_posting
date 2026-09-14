@@ -519,10 +519,15 @@ $('#generateBusiness').addEventListener('click', async () => {
   try {
     await api(`/channels/${id}/business/draft`, {method:'POST', body:JSON.stringify(input)});
     toast('Черновик готов — требуется ваше согласование');
-    if (channel?.id === id) { $('#businessStatus').textContent = 'Черновик сохранён во вкладке «Посты».'; openPage('feed'); }
+    if (channel?.id === id) {
+      $('#businessStatus').textContent = 'Черновик сохранён во вкладке «Посты».';
+      openPage('feed'); await switchFeed('pending');
+    }
   } catch (error) {
-    toast(error.message, true);
-    if (channel?.id === id) $('#businessStatus').textContent = error.message;
+    if (channel?.id === id) {
+      $('#businessStatus').textContent = error.message;
+      $('#businessStatus').scrollIntoView({behavior:'smooth', block:'center'});
+    } else toast(error.message, true);
   } finally {
     publishingNow = false;
     $('#generateBusiness').disabled = !channel?.business_mode;
@@ -580,6 +585,9 @@ function save(body, silent = false) {
       boot.channels = boot.channels.map(c => c.id === id ? updated : c);
       if (channel?.id === id) channel = updated;
       Object.entries(body).forEach(([key, value]) => { if (drafts.get(`${id}:${key}`) === value) drafts.delete(`${id}:${key}`); });
+      if (body.business_profile) Object.entries(body.business_profile).forEach(([key, value]) => {
+        if (drafts.get(`${id}:business:${key}`) === value) drafts.delete(`${id}:business:${key}`);
+      });
       $('#saveStatus').textContent = 'Изменения сохранены';
       if (!silent) toast('Сохранено');
       if (['business_mode', 'business_auto'].some(key => key in body)) fillSettings();

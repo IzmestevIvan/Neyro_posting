@@ -83,6 +83,26 @@ const assert = require('node:assert/strict');
           assert.equal(await page.locator('[data-act="approve"]').isDisabled(),true);
           await page.locator('[data-act="cancel-edit"]').click();
           assert.equal(await page.locator('[data-act="approve"]').isDisabled(),false);
+          await page.evaluate(async () => {
+            switchFeed('history');
+            openBusiness();
+          });
+          await page.locator('#generateBusiness').click();
+          await page.waitForFunction(() => !publishingNow && page === 'feed');
+          assert.equal(await page.locator('#feed').isVisible(),true);
+          assert.equal(await page.locator('#history').isVisible(),false);
+          await page.evaluate(() => {
+            openBusiness();
+            const original = api;
+            api = async (url, options) => {
+              if(url.endsWith('/business/draft')) throw Error('Не удалось прочитать указанную страницу. Очистите ссылку.');
+              return original(url, options);
+            };
+          });
+          await page.locator('#generateBusiness').click();
+          await page.waitForFunction(() => !publishingNow);
+          assert.ok((await page.locator('#businessStatus').textContent()).includes('Очистите ссылку'));
+          assert.equal(await page.locator('#generateBusiness').isEnabled(),true);
         }
       }
       await page.close();

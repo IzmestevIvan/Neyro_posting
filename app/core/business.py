@@ -11,6 +11,7 @@ from app.ai import gemini
 from app.core import access, runtime
 from app.core.filters import fingerprint, find_duplicate
 from app.sources import web
+from app.sources.safe_http import UnsafeURL
 
 log = logging.getLogger('business')
 PROFILE_FIELDS = {'name', 'website', 'services', 'audience', 'geography', 'tone', 'facts', 'restrictions'}
@@ -46,30 +47,43 @@ def clean_profile(value):
 
 
 async def draft_text(channel, brief='', article_url=''):
+    brief, article_url = brief.strip(), article_url.strip()
     profile = json.loads(channel.get('business_profile') or '{}')
     if not profile.get('name') or not profile.get('services'):
         raise ValueError('Заполните название компании и её услуги в досье')
     evidence = ''
+    warning = ''
     url = article_url or profile.get('website', '')
     if url:
         # safe_http validates DNS, redirects, response type and size (SSRF protection).
-        async with httpx.AsyncClient() as client:
-            article = await web.fetch_article(client, url)
-        evidence = article.text[:8000]
+        try:
+            async with asyncio.timeout(25), httpx.AsyncClient() as client:
+                article = await web.fetch_article(client, url)
+            evidence = article.text[:8000]
+        except UnsafeURL:
+            raise ValueError('Ссылка недоступна для безопасного чтения. Укажите публичную страницу или удалите сайт из досье.')
+        except (httpx.HTTPError, ValueError, TimeoutError):
+            if article_url:
+                raise ValueError('Не удалось прочитать указанную страницу. Вставьте нужные факты в поле новости и очистите ссылку, либо укажите другую страницу.')
+            warning = 'Сайт компании не удалось прочитать. Черновик основан только на досье и вашем тексте; сведения сайта не проверены. '
+            log.warning('Сайт из досье недоступен для чтения: канал %s; используем предоставленные данные', channel['id'])
+            url = ''
     recent = await db.fetch_all(
         "SELECT substr(text_out,1,250) AS text FROM posts WHERE channel_id=? "
-        "AND business_draft=1 AND text_out IS NOT NULL ORDER BY id DESC LIMIT 12", (channel['id'],))
+        "AND business_generated=1 AND text_out IS NOT NULL ORDER BY id DESC LIMIT 12", (channel['id'],))
     prompt = json.dumps({'dossier': profile, 'owner_request': brief,
                          'reference_url': url, 'unverified_web_reference': evidence,
                          'recent_topics': [r['text'] for r in recent], 'language': channel['lang']}, ensure_ascii=False)
     result = await gemini.generate_json(prompt, api_key=channel.get('gemini_key') or None,
                                         system=SYSTEM, temperature=0.5)
+    if not isinstance(result, dict):
+        raise gemini.AIError('Некорректный ответ редактора')
     text, review = result.get('text'), result.get('review')
     if not isinstance(text, str) or not isinstance(review, str) or len(text) > 3000:
         raise gemini.AIError('Некорректный ответ редактора')
     if len(text.strip()) < 40:
         raise ValueError((review or 'Недостаточно фактов для поста')[:500])
-    return text.strip(), ('Требуется согласование. ' + review)[:1500], url
+    return text.strip(), ('Требуется согласование. ' + warning + review)[:1500], url
 
 
 async def generate(channel_id, brief='', article_url='', *, automatic=False):
@@ -117,7 +131,11 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
                 "VALUES($1,'Редактор компании',$2,$3,$4,'pending',$5,1,1,1,$6,now()) RETURNING id",
                 channel_id, brief, text, url, review, fp)
             await conn.execute('UPDATE channels SET business_next_at=$1 WHERE id=$2', db.utcnow()+timedelta(days=1), channel_id)
-        await db.bump_stat(channel_id, db.utcnow().date(), 'ai_requests')
+        try:
+            await db.bump_stat(channel_id, db.utcnow().date(), 'ai_requests')
+        except Exception:
+            # The draft is already committed; don't report failure and invite duplicates.
+            log.exception('Черновик сохранён, но статистика ИИ не обновлена: канал %s', channel_id)
         return {'ok': True, 'post_id': post_id, 'status': 'pending'}
 
 

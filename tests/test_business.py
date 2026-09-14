@@ -13,6 +13,35 @@ from tests.test_pipeline_db import FakeBot, make_post
 TEXT = 'Перед оснащением переговорной определите число участников, сценарии встреч и требования к звуку. Это поможет составить понятное техническое задание.'
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('explicit', [False, True])
+async def test_unreadable_website_only_blocks_explicit_reference(store,channel,monkeypatch,explicit):
+    current = await enable(store,channel)
+    current['business_profile'] = business.clean_profile({'name':'DOBRA','services':'Связь','website':'https://example.org'})
+    monkeypatch.setattr(business.web,'fetch_article',AsyncMock(side_effect=ValueError('не удалось извлечь текст')))
+    ai = AsyncMock(return_value={'text':TEXT,'review':'Проверьте факты'})
+    monkeypatch.setattr(gemini,'generate_json',ai)
+    if explicit:
+        with pytest.raises(ValueError,match='очистите ссылку'):
+            await business.draft_text(current,'Наш проект', 'https://example.org/project')
+        ai.assert_not_called()
+    else:
+        text, review, url = await business.draft_text(current,'Наш проект', '   ')
+        assert text==TEXT and not url and 'не удалось прочитать' in review
+        prompt = json.loads(ai.call_args.args[0])
+        assert prompt['owner_request']=='Наш проект' and prompt['unverified_web_reference']==''
+
+
+@pytest.mark.asyncio
+async def test_statistics_failure_does_not_hide_saved_draft(store,channel,monkeypatch):
+    await enable(store,channel)
+    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'text':TEXT,'review':''}))
+    monkeypatch.setattr(store,'bump_stat',AsyncMock(side_effect=RuntimeError('stats unavailable')))
+    result = await business.generate(channel['id'])
+    assert result['status']=='pending'
+    assert (await store.fetch_one('SELECT count(*) AS n FROM posts'))['n']==1
+
+
 async def enable(store, channel, auto=False):
     profile = business.clean_profile({'name': 'DOBRA', 'services': 'Мультимедиа и связь'})
     await store.execute('UPDATE channels SET business_mode=1,business_auto=?,business_profile=? WHERE id=?',
