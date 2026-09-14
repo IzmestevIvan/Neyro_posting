@@ -43,6 +43,9 @@ services:
   support:
     image: neyro-posting:latest
     command: ["python", "-m", "app.support"]
+    # This worker has no HTTP server; do not inherit the main app's HTTP probe.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     logging: *bounded-logs
     init: true
