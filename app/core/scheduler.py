@@ -388,14 +388,14 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
     fact_check = json.dumps(result.fact_check, ensure_ascii=False) if result.fact_check else None
     short = len(result.text or "") <= DIGEST_MAX_LEN
 
-    if channel["digest_enabled"] and short and not post["is_manual"] and not result.needs_review:
+    if channel["digest_enabled"] and not channel.get('business_mode') and short and not post["is_manual"] and not result.needs_review:
         await db.execute(
             "UPDATE posts SET status = 'digest', text_out = ?, fact_check = ?, publish_at=NULL, reason=NULL WHERE id = ? AND status='new'",
             (result.text, fact_check, post["id"]),
         )
         return
 
-    if channel["autopost"] and not result.needs_review and not force_once:
+    if channel["autopost"] and not channel.get('business_mode') and not result.needs_review and not force_once:
         publish_at = await _plan_publish_at(channel)
         await db.execute(
             "UPDATE posts SET status = 'approved', text_out = ?, fact_check = ?, publish_at = ?, reason=NULL WHERE id = ? AND status='new'",
@@ -447,6 +447,9 @@ async def publish_due(bot: Bot) -> None:
 
 
 async def run_digest(bot: Bot, channel: dict) -> None:
+    fresh_channel = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
+    if not fresh_channel or fresh_channel.get('business_mode'):
+        return
     if not await access.owner_has_access(channel["owner_id"]):
         return
     # Until digest moderation is implemented, never auto-send in manual mode.
@@ -699,7 +702,9 @@ async def stats_loop(bot: Bot) -> None:
 
 
 def start(bot: Bot) -> list[asyncio.Task]:
+    from app.core.business import proposal_loop
     return [
+        asyncio.create_task(proposal_loop()),
         asyncio.create_task(poll_loop(bot)),
         asyncio.create_task(process_loop(bot)),
         asyncio.create_task(publish_loop(bot)),
@@ -722,6 +727,9 @@ async def publish_fresh_once(bot: Bot, channel: dict) -> dict:
 
 
 async def _publish_fresh_once(bot: Bot, channel: dict) -> dict:
+    fresh_channel = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
+    if fresh_channel and fresh_channel.get('business_mode'):
+        raise ValueError('Бизнес-режим: подготовьте черновик и подтвердите его в приложении')
     if not await access.owner_has_access(channel['owner_id']):
         raise ValueError('Доступ владельца закрыт')
     if await publisher.quota_left(channel['owner_id']) <= 0:

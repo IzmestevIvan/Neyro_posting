@@ -91,6 +91,8 @@ function renderStats(stats) {
     ['', stats.remaining, 'постов осталось · все каналы'],
   ];
   $('#publishNow').disabled = publishingNow || !stats.sources || stats.remaining <= 0;
+  $('#publishNow').innerHTML = channel.business_mode ? 'Подготовить пост компании' : `${icon('bolt')} Опубликовать сейчас`;
+  if (channel.business_mode) $('#publishNow').disabled = publishingNow;
   $('#publishHint').textContent = publishingNow ? 'Проверяю источники и готовлю один свежий пост…'
     : stats.remaining <= 0 ? 'Дневной лимит исчерпан.'
     : !stats.sources ? 'Добавьте источник, чтобы подготовить свежий пост.'
@@ -101,6 +103,10 @@ function renderStats(stats) {
     : ['Источники подключены', stats.mode === 'автопостинг' ? 'Готовые материалы публикуются по вашим правилам.' : 'Новые материалы появятся в разделе «Посты» для вашего одобрения.', 'sources', 'Посмотреть источники'];
   $('#nextStep').innerHTML = `<div><span class="eyebrow">СЛЕДУЮЩИЙ ШАГ</span><h3>${next[0]}</h3><p>${next[1]}</p></div><button class="ghost" data-go="${next[2]}">${next[3]} ${icon('back')}</button>`;
 
+  if (channel.business_mode) {
+    $('#publishHint').textContent = 'Досье компании → черновик → ваше подтверждение. Без согласования ничего не публикуем.';
+    $('#nextStep').innerHTML = `<div><span class="eyebrow">РЕДАКТОР КОМПАНИИ</span><h3>Публикации от лица бизнеса</h3><p>Досье — в настройках. Готовые черновики — во вкладке «Посты».</p></div><button class="ghost" data-go="settings">Досье компании ${icon('back')}</button>`;
+  }
   $('#statsGrid').innerHTML = cells
     .map(([cls, value, label]) => `<div class="stat ${cls}"><b>${value ?? 0}</b><i>${label}</i></div>`)
     .join('');
@@ -198,8 +204,8 @@ async function loadFeed() {
         ${attached}${warn}${post.reason ? `<p class="note warn">${esc(post.reason)}</p>` : ''}
         <div class="text">${esc(post.text_out || post.raw_text)}</div>
         <div class="acts">
-          <button class="ok" data-act="approve" ${post.text_out?.trim() ? '' : 'disabled title="Нет готового текста"'}>${icon('check')} Опубликовать</button>
-          <button data-act="regen">${icon('refresh')} Переписать</button>
+          <button class="ok" data-act="approve" ${post.text_out?.trim() ? '' : 'disabled title="Нет готового текста"'}>${icon('check')} ${post.business_draft ? 'Согласовать и опубликовать' : 'Опубликовать'}</button>
+          <button data-act="${post.business_draft ? 'edit' : 'regen'}">${icon('refresh')} ${post.business_draft ? 'Править' : 'Переписать'}</button>
           <button class="no" data-act="reject" aria-label="Отклонить пост">${icon('close')}</button>
         </div>
       </article>`;
@@ -213,14 +219,31 @@ $('#feed').addEventListener('click', async (event) => {
   const article = button.closest('.post');
   const { id } = article.dataset;
   const action = button.dataset.act;
+  if (action === 'edit') {
+    if (article.querySelector('.business-edit')) return;
+    const editor = document.createElement('div');
+    editor.className = 'business-edit';
+    editor.innerHTML = '<label>Текст перед согласованием<textarea maxlength="3000"></textarea></label><button data-act="save-edit">Сохранить правки</button><button data-act="cancel-edit">Отмена</button>';
+    editor.querySelector('textarea').value = article.querySelector('.text').textContent;
+    article.appendChild(editor);
+    article.querySelector('[data-act="approve"]').disabled = true;
+    return;
+  }
+  if (action === 'cancel-edit') {
+    article.querySelector('.business-edit').remove();
+    article.querySelector('[data-act="approve"]').disabled = false;
+    return;
+  }
 
   $$('.post .acts button').forEach((b) => (b.disabled = true));
   try {
-    const result = await api(`/posts/${id}/${action}`, { method: 'POST' });
+    const result = await api(`/posts/${id}/${action === 'save-edit' ? 'edit' : action}`, { method: 'POST',
+      ...(action === 'save-edit' ? {body: JSON.stringify({text:article.querySelector('.business-edit textarea').value})}
+        : action === 'approve' ? {body:JSON.stringify({text:article.querySelector('.text').textContent})} : {}) });
     tg?.HapticFeedback?.notificationOccurred('success');
-    if (action === 'regen') {
+    if (action === 'regen' || action === 'save-edit') {
       await loadFeed();
-      toast('Переписано');
+      toast('Черновик сохранён. Для публикации подтвердите его.');
     } else {
       article.remove();
       toast(action === 'approve' ? 'Опубликовано' : 'Отклонено');
@@ -229,7 +252,7 @@ $('#feed').addEventListener('click', async (event) => {
   } catch (error) {
     toast(error.message, true);
   } finally {
-    $$('.post .acts button').forEach((b) => (b.disabled = b.dataset.act === 'approve' && b.hasAttribute('title')));
+    $$('.post .acts button').forEach((b) => (b.disabled = b.dataset.act === 'approve' && (b.hasAttribute('title') || !!b.closest('.post').querySelector('.business-edit'))));
   }
 });
 
@@ -443,6 +466,12 @@ $('#addSource').addEventListener('click', async () => {
 
 function fillSettings() {
   if (!channel) return;
+  let profile = {};
+  try { profile = JSON.parse(channel.business_profile || '{}'); } catch {}
+  $$('[data-business]').forEach(el => { el.value = drafts.get(`${channel.id}:business:${el.dataset.business}`) ?? profile[el.dataset.business] ?? ''; });
+  $('#businessBrief').value = drafts.get(`${channel.id}:businessBrief`) || '';
+  $('#businessUrl').value = drafts.get(`${channel.id}:businessUrl`) || '';
+  $('#generateBusiness').disabled = !channel.business_mode || publishingNow;
   $('#logoStatus').textContent = channel.logo_configured ? 'Логотип сохранён.' : 'Логотип пока не загружен.';
   $$('[data-field]').forEach((el) => {
     const value = drafts.get(`${channel.id}:${el.dataset.field}`) ?? channel[el.dataset.field];
@@ -451,12 +480,55 @@ function fillSettings() {
     if (el.dataset.field === 'gemini_key') el.placeholder = channel.gemini_key_configured ? 'Ключ сохранён. Введите новый для замены' : 'Общий ключ сервиса';
   });
   $('#quality').value = QUALITY.indexOf(channel.quality);
+  ['autopost', 'digest_enabled'].forEach(key => { $(`[data-field="${key}"]`).disabled = !!channel.business_mode; });
   updateQualityLabel();
   renderChips('#delayChips', DELAY_LABELS, channel.delay_mode, (key) => save({ delay_mode: key }));
   renderChips('#paceChips', PACE_LABELS, channel.pace, (key) => save({ pace: key }));
   updateSignaturePreview();
   renderPlan();
 }
+
+function openBusiness() {
+  openPage('settings');
+  $('#businessSettings').open = true;
+  $('#businessSettings').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+$$('[data-business]').forEach(el => el.addEventListener('input', () => {
+  if (channel) drafts.set(`${channel.id}:business:${el.dataset.business}`, el.value);
+}));
+['businessBrief', 'businessUrl'].forEach(id => $(`#${id}`).addEventListener('input', () => {
+  if (channel) drafts.set(`${channel.id}:${id}`, $(`#${id}`).value);
+}));
+$('#saveBusiness').addEventListener('click', async () => {
+  const profile = Object.fromEntries($$('[data-business]').map(el => [el.dataset.business, el.value]));
+  await save({business_profile: profile});
+});
+$('#generateBusiness').addEventListener('click', async () => {
+  if (!channel || publishingNow || savingCount) return;
+  const id = channel.id;
+  const input = {brief: $('#businessBrief').value, url: $('#businessUrl').value};
+  let saved = {};
+  try { saved = JSON.parse(channel.business_profile || '{}'); } catch {}
+  if ($$('[data-business]').some(el => el.value.trim() !== (saved[el.dataset.business] || ''))) {
+    toast('Сначала сохраните изменения досье', true); return;
+  }
+  publishingNow = true;
+  $('#generateBusiness').disabled = true;
+  $('#businessStatus').textContent = 'Готовим черновик. Это может занять несколько минут; публикации не будет.';
+  try {
+    await api(`/channels/${id}/business/draft`, {method:'POST', body:JSON.stringify(input)});
+    toast('Черновик готов — требуется ваше согласование');
+    if (channel?.id === id) { $('#businessStatus').textContent = 'Черновик сохранён во вкладке «Посты».'; openPage('feed'); }
+  } catch (error) {
+    toast(error.message, true);
+    if (channel?.id === id) $('#businessStatus').textContent = error.message;
+  } finally {
+    publishingNow = false;
+    $('#generateBusiness').disabled = !channel?.business_mode;
+    await refreshStats();
+  }
+});
 
 function renderPlan() {
   const { user } = boot;
@@ -510,7 +582,8 @@ function save(body, silent = false) {
       Object.entries(body).forEach(([key, value]) => { if (drafts.get(`${id}:${key}`) === value) drafts.delete(`${id}:${key}`); });
       $('#saveStatus').textContent = 'Изменения сохранены';
       if (!silent) toast('Сохранено');
-      if (['paused', 'autopost'].some(key => key in body)) await refreshStats();
+      if (['business_mode', 'business_auto'].some(key => key in body)) fillSettings();
+      if (['paused', 'autopost', 'business_mode'].some(key => key in body)) await refreshStats();
     } catch (error) {
       $('#saveStatus').textContent = `Не сохранено: ${error.message}. Повторите изменение.`;
       toast(error.message, true);
@@ -857,6 +930,7 @@ $('#channelSelect').addEventListener('change', (event) => {
 
 $('#publishNow').addEventListener('click', async () => {
   if (!channel) return;
+  if (channel.business_mode) { openBusiness(); return; }
   publishingNow = true;
   $('#publishNow').disabled = true;
   $('#publishHint').textContent = 'Проверяю источники и готовлю один свежий пост…';

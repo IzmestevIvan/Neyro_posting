@@ -36,6 +36,7 @@ const assert = require('node:assert/strict');
           if(url==='/admin/overview')return {totals:{posts:1234,published:222,ai_today:98},users:[{tg_id:123456789,first_name:'Пользователь с очень длинным именем',channels:4,daily_limit:100}],channels:[c]};
           if(url.includes('/stats'))return window.fixtureStats;
           if(url.includes('/sources'))return [{id:1,kind:'tg',ref:'very_long_source_name_123456789',title:'Название источника с длинным заголовком',enabled:1}];
+          if(url.includes('/feed') && channel.business_mode)return [{id:123,business_draft:1,media:[],source_title:'Редактор компании',text_out:'Перед оснащением переговорной определите число участников, сценарии встреч и требования к звуку. Это поможет составить понятное техническое задание.',reason:'Требуется согласование. Проверьте терминологию.',created_at:new Date().toISOString()}];
           return [];
         };
         $('#boot').hidden=true; $('#app').hidden=false; $('#openAdmin').hidden=false;
@@ -44,25 +45,44 @@ const assert = require('node:assert/strict');
         fillOptions($('#digestTime'),[['21:00','21:00']]); fillOptions($('#promoPlan'),[['start','Старт']]);
         enterNormalMode();
       });
-      for (const view of ['home','sources','settings','admin']) {
+      for (const view of ['home','sources','settings','admin','business-home','business-settings','business-feed']) {
         await page.evaluate(async view => {
+          if(view.startsWith('business-')) {
+            $('#closeAdmin').click();
+            channel.business_mode=1; channel.autopost=0; channel.digest_enabled=0;
+            channel.business_profile=JSON.stringify({name:'DOBRA Group',services:'Мультимедиа, телекоммуникации, инженерные сети',audience:'Заказчики и генеральные подрядчики',tone:'Профессионально и понятно'});
+            fillSettings();
+            view=view.replace('business-','');
+          }
           if(view==='admin') {
             $('#openAdmin').click(); await loadAdmin();
             renderSystem({cpu:12,ram_percent:60,ram_used:1.2,ram_total:2,disk_percent:70,disk_used:17,disk_total:25,process_mb:180,activity:'Проверка источников'});
-          } else { openPage(view); if(view==='home')renderStats(window.fixtureStats); }
+          } else { openPage(view); if(view==='home')renderStats(window.fixtureStats); if(view==='feed')await loadFeed(); }
           if(view==='settings')document.querySelectorAll('#page-settings > details').forEach(d=>d.open=true);
         }, view);
         await page.screenshot({path:path.join(out,`${width}-${view}.png`), fullPage:true});
         const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
         if(overflow) failures.push(`${width}px ${view}: horizontal overflow`);
         const visibleSupport = await page.locator('#supportLink').isVisible();
-        if(visibleSupport !== (view==='settings')) failures.push(`${width}px ${view}: misplaced support link`);
-        if(view==='settings') {
+        if(visibleSupport !== view.endsWith('settings')) failures.push(`${width}px ${view}: misplaced support link`);
+        if(view.endsWith('settings')) {
           const reachable = await page.locator('#supportLink').evaluate(el => {
             const rect = el.getBoundingClientRect();
             return rect.top >= 0 && rect.bottom <= innerHeight - 92;
           });
           if(!reachable) failures.push(`${width}px settings: support requires scrolling`);
+        }
+        if(view==='business-settings') {
+          assert.equal(await page.locator('[data-field="autopost"]').isDisabled(),true);
+          assert.equal(await page.locator('[data-business="name"]').inputValue(),'DOBRA Group');
+          assert.ok((await page.locator('[data-business="name"]').boundingBox()).height >= 44);
+          await page.locator('#businessSettings').screenshot({path:path.join(out,`${width}-dossier.png`)});
+        }
+        if(view==='business-feed') {
+          await page.locator('[data-act="edit"]').click();
+          assert.equal(await page.locator('[data-act="approve"]').isDisabled(),true);
+          await page.locator('[data-act="cancel-edit"]').click();
+          assert.equal(await page.locator('[data-act="approve"]').isDisabled(),false);
         }
       }
       await page.close();

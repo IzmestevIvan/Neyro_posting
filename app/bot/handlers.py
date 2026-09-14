@@ -449,7 +449,7 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
 
     await callback.answer("Публикую…")
     try:
-        await publisher.publish_post(bot, post, channel)
+        await publisher.publish_post(bot, post, channel, approved_by_user=True)
     except publisher.AlreadyPublished as exc:
         return await callback.message.answer(str(exc))
     except Exception as exc:

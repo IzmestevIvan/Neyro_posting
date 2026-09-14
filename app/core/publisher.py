@@ -225,14 +225,14 @@ class RecordedBot:
         return send
 
 
-async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False) -> int:
+async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None) -> int:
     # Bound album buffers for API requests as well as background publications.
     async with runtime.delivery_slots:
         with channel_scope(channel):
-            return await _publish_post(bot, post, channel, background=background)
+            return await _publish_post(bot, post, channel, background=background, approved_by_user=approved_by_user, approved_text=approved_text)
 
 
-async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False) -> int:
+async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None) -> int:
     if not await access.owner_has_access(channel['owner_id']):
         raise PermissionError('доступ владельца закрыт')
     pool = await db.connect()
@@ -242,9 +242,11 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             from app.api.auth import has_access
             if not owner or not has_access(dict(owner)):
                 raise PermissionError('доступ владельца закрыт')
-            current_channel = await conn.fetchrow('SELECT * FROM channels WHERE id=$1', channel['id'])
+            current_channel = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
             if not current_channel or current_channel['owner_id'] != channel['owner_id']:
                 raise AlreadyPublished('Канал больше недоступен')
+            if current_channel['business_mode'] and (background or not approved_by_user):
+                raise AlreadyPublished('Бизнес-режим: требуется явное согласование')
             if background:
                 channel = dict(current_channel)
                 if channel['paused'] or not channel['autopost'] or not news_policy.window_open(channel):
@@ -260,6 +262,10 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             fresh = await conn.fetchrow('SELECT * FROM posts WHERE id=$1 FOR UPDATE', post['id'])
             if not fresh or fresh['channel_id'] != channel['id'] or fresh['status'] not in CLAIMABLE:
                 raise AlreadyPublished('пост недоступен для публикации или уже отправляется')
+            if fresh['business_draft'] and (background or not approved_by_user):
+                raise AlreadyPublished('Бизнес-черновик нельзя отправлять без согласования')
+            if (current_channel['business_mode'] or fresh['business_draft']) and fresh['text_out'] != approved_text:
+                raise AlreadyPublished('Текст изменился. Обновите ленту и согласуйте актуальную версию')
             if news_policy.stale(dict(fresh), channel):
                 raise AlreadyPublished('Новость устарела и больше не доступна для публикации')
             if news_policy.realtime(channel) and not fresh['is_manual'] and await conn.fetchval(

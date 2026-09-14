@@ -27,13 +27,14 @@ from app.config import (
     PACE_MODES,
     TIMEZONES,
 )
-from app.core import promo, publisher, scheduler, watermark, runtime
+from app.core import promo, publisher, scheduler, watermark, runtime, business
 from app.sources import rss, telegram_web
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger('api')
 
 BOOL_FIELDS = {
+    "business_mode", "business_auto",
     "autopost", "paused", "channel_voice", "hits_only", "media_only", "digest_enabled", "watermark",
 }
 TEXT_FIELDS = {"instructions", "stopwords", "signature_text", "signature_url", "gemini_key"}
@@ -50,7 +51,12 @@ def public_channel(channel: dict) -> dict:
 def _clean_settings(payload: dict) -> dict:
     out: dict[str, Any] = {}
     for key, value in payload.items():
-        if key in BOOL_FIELDS:
+        if key == 'business_profile':
+            try:
+                out[key] = business.clean_profile(value)
+            except (ValueError, httpx.InvalidURL) as exc:
+                raise HTTPException(422, str(exc)) from exc
+        elif key in BOOL_FIELDS:
             if type(value) is not bool:
                 raise HTTPException(422, f"{key}: ожидается переключатель true/false")
             out[key] = int(value)
@@ -204,10 +210,23 @@ async def update_channel(
         if sample:
             fields["voice_sample"] = sample
 
-    assignments = ", ".join(f"{key} = ?" for key in fields)
-    await db.execute(
-        f"UPDATE channels SET {assignments} WHERE id = ?", (*fields.values(), channel_id)
-    )
+    pool = await db.connect()
+    async with pool.acquire() as conn, conn.transaction():
+        fresh = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel_id)
+        if not fresh:
+            raise HTTPException(404, 'Канал удалён')
+        if fields.get('business_mode', fresh['business_mode']):
+            fields.update(autopost=0, digest_enabled=0)
+        if fields.get('business_auto', fresh['business_auto']):
+            profile = json.loads(fields.get('business_profile', fresh['business_profile']))
+            if not profile.get('name') or not profile.get('services'):
+                raise HTTPException(422, 'Для ежедневных предложений заполните название и услуги компании')
+        assignments = ', '.join(f'{key}=${i}' for i, key in enumerate(fields, 1))
+        await conn.execute(f'UPDATE channels SET {assignments} WHERE id=${len(fields)+1}', *fields.values(), channel_id)
+        if fields.get('business_mode') and not fresh['business_mode']:
+            await conn.execute("UPDATE posts SET status='pending',business_draft=1,publish_at=NULL, "
+                "reason='Включён бизнес-режим: требуется согласование' WHERE channel_id=$1 "
+                "AND status IN ('approved','digest')", channel_id)
     if any(fields.get(key) == 0 and channel[key] for key in ('hits_only', 'media_only')):
         await scheduler.reconsider_filtered(channel_id)
     await db.set_kv(f"active:{user['tg_id']}", channel_id)
@@ -364,7 +383,7 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
 async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
     await owned_channel(channel_id, user)
     rows = await db.fetch_all(
-        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, reason, created_at "
+        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, reason, created_at, business_draft "
         "FROM posts WHERE channel_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 30",
         (channel_id,),
     )
@@ -412,6 +431,22 @@ async def post_action(
             raise HTTPException(409, "статус поста изменился; обновите ленту")
         return {"ok": True}
 
+    if action == 'edit' and post.get('business_draft'):
+        payload = await request.json()
+        text = payload.get('text') if isinstance(payload, dict) else None
+        if not isinstance(text, str) or not 40 <= len(text.strip()) <= 3000:
+            raise HTTPException(422, 'Текст поста: от 40 до 3000 символов')
+        if post['status'] != 'pending':
+            raise HTTPException(409, 'Пост уже не ожидает согласования')
+        if not await publisher.replace_draft(post, text.strip(), None):
+            raise HTTPException(409, 'Пост изменился — обновите ленту')
+        return {'ok': True}
+
+    if action == "regen" and post.get('business_draft'):
+        if post['status'] != 'pending':
+            raise HTTPException(409, 'Можно изменить только ожидающий согласования черновик')
+        raise HTTPException(409, 'Отклоните этот вариант и подготовьте новый с уточнённой темой в досье компании')
+
     if action == "regen":
         if post["status"] not in publisher.CLAIMABLE:
             raise HTTPException(409, "пост недоступен для редактирования")
@@ -435,10 +470,17 @@ async def post_action(
         return {"ok": True, "text": result.text}
 
     if action == "approve":
+        approved_text = None
+        if channel.get('business_mode') or post.get('business_draft'):
+            try:
+                payload = await request.json()
+            except ValueError:
+                payload = {}
+            approved_text = payload.get('text') if isinstance(payload, dict) else None
         if await publisher.quota_left(user["tg_id"]) <= 0:
             raise HTTPException(429, "исчерпан дневной лимит")
         try:
-            await publisher.publish_post(bot, post, channel)
+            await publisher.publish_post(bot, post, channel, approved_by_user=True, approved_text=approved_text)
         except publisher.QuotaExceeded as exc:
             raise HTTPException(429, str(exc)) from exc
         except publisher.DeliveryUncertain as exc:
@@ -458,6 +500,8 @@ async def publish_now(
     channel_id: int, request: Request, user: dict = Depends(active_user)
 ) -> dict:
     channel = await owned_channel(channel_id, user)
+    if channel.get('business_mode'):
+        raise HTTPException(409, 'В бизнес-режиме сначала подготовьте и согласуйте черновик во вкладке «Посты»')
     if await publisher.quota_left(channel["owner_id"]) <= 0:
         raise HTTPException(429, "исчерпан дневной лимит")
     try:
@@ -471,6 +515,20 @@ async def publish_now(
     except Exception as exc:
         log.warning('Публикация сейчас не выполнена: канал %s', channel_id, exc_info=True)
         raise HTTPException(502, "Не удалось подготовить или отправить свежий пост. Попробуйте позже.") from exc
+
+
+@router.post('/channels/{channel_id}/business/draft')
+async def business_draft(channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)) -> dict:
+    await owned_channel(channel_id, user)
+    if set(payload) - {'brief', 'url'}:
+        raise HTTPException(422, 'Недопустимые поля запроса')
+    try:
+        return await business.generate(channel_id, payload.get('brief', ''), payload.get('url', ''))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        log.exception('Ошибка подготовки бизнес-черновика: канал %s', channel_id)
+        raise HTTPException(502, 'Не удалось подготовить черновик. Проверьте доступность сайта и повторите позже; пост не опубликован.') from exc
 
 
 @router.get("/channels/{channel_id}/sources")

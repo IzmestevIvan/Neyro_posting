@@ -41,6 +41,7 @@ async def main():
                 page.raise_for_status()
                 assert '/static/app.js?v=' in page.text
                 assert 'id="logoUpload"' in page.text and 'id="watermarkPosition"' in page.text
+                assert 'id="businessSettings"' in page.text and 'id="generateBusiness"' in page.text
                 denied = await client.get(base+'/api/bootstrap')
                 assert denied.status_code==401
                 print(f'HTTP: {base}, health/page/auth OK')
@@ -65,6 +66,7 @@ async def main():
                 boot.raise_for_status()
                 assert all(not {'gemini_key','logo_path','voice_sample'} & c.keys() for c in boot.json()['channels'])
                 assert all(c['watermark_position'] in ('top-left','top-right','center','bottom-left','bottom-right') for c in boot.json()['channels'])
+                assert all('business_mode' in c and 'business_profile' in c for c in boot.json()['channels'])
                 started = time.monotonic()
                 replies = await asyncio.gather(*(client.get(
                     f"http://127.0.0.1:8080/api/channels/{channels[0]['id']}/stats",headers=headers) for _ in range(30)))

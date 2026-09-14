@@ -451,6 +451,13 @@ body.tour-open { overflow:hidden; }
 
 /* Shared layout fixes for settings, diagnostics and administrative controls. */
 :root { color-scheme: dark; }
+#businessSettings .label { display:grid; gap:8px; margin:0; }
+#businessSettings .label input, #businessSettings .label textarea { width:100%; }
+#businessSettings .label input { appearance:none; background:var(--surface-2); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:13px 14px; min-height:48px; font:inherit; font-size:16px; }
+#businessSettings .label input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+#businessSettings { scroll-margin-top:16px; }
+.business-edit { margin:0 16px 16px; display:grid; gap:10px; }
+.business-edit textarea { width:100%; min-height:200px; }
 body { padding-bottom:calc(92px + env(safe-area-inset-bottom)); }
 button, select, input, textarea { min-width:0; }
 button { white-space:normal; line-height:1.35; }

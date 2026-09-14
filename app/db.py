@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS channels (
   username       TEXT,
   title          TEXT,
   autopost       INTEGER NOT NULL DEFAULT 0,
+  business_mode  INTEGER NOT NULL DEFAULT 0,
+  business_auto  INTEGER NOT NULL DEFAULT 0,
+  business_profile TEXT NOT NULL DEFAULT '{}',
+  business_next_at TIMESTAMPTZ,
   paused         INTEGER NOT NULL DEFAULT 0,
   delay_mode     TEXT    NOT NULL DEFAULT 'instant',
   pace           TEXT    NOT NULL DEFAULT 'as_they_come',
@@ -125,6 +129,7 @@ CREATE TABLE IF NOT EXISTS posts (
   mod_message_id BIGINT,
   attempts       INTEGER NOT NULL DEFAULT 0,
   is_manual      INTEGER NOT NULL DEFAULT 0,
+  business_draft INTEGER NOT NULL DEFAULT 0,
   created_at     TIMESTAMPTZ NOT NULL,
   published_at   TIMESTAMPTZ
 );
@@ -189,6 +194,11 @@ CREATE TABLE IF NOT EXISTS kv (
 # Columns added after the first Postgres release. CREATE TABLE IF NOT EXISTS never alters an
 # existing table, so anything new has to be listed here as well as in SCHEMA above.
 MIGRATIONS: list[tuple[str, str, str]] = [
+    ('channels', 'business_mode', 'INTEGER NOT NULL DEFAULT 0'),
+    ('channels', 'business_auto', 'INTEGER NOT NULL DEFAULT 0'),
+    ('channels', 'business_profile', "TEXT NOT NULL DEFAULT '{}'"),
+    ('channels', 'business_next_at', 'TIMESTAMPTZ'),
+    ('posts', 'business_draft', 'INTEGER NOT NULL DEFAULT 0'),
     ('channels', 'watermark_position', "TEXT NOT NULL DEFAULT 'bottom-right'"),
     ("users", "max_channels", "INTEGER NOT NULL DEFAULT 1"),
     ("users", "access_until", "TIMESTAMPTZ"),

@@ -235,6 +235,28 @@
   <section id="page-settings" class="page" hidden>
     <div class="workspace-intro"><span class="eyebrow">ПРАВИЛА КАНАЛА</span><h2>Настройки редакции</h2><p id="saveStatus" class="hint" role="status">Переключатели сохраняются сразу. Текст — кнопкой под полем.</p></div>
     <a id="supportLink" class="ghost support-link" hidden target="_blank" rel="noopener noreferrer">Написать в поддержку <span aria-hidden="true">↗</span></a>
+    <details class="card group" id="businessSettings">
+      <summary><span>Для бизнеса · досье компании</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <div class="body">
+        <label class="row"><span><b>Режим бизнеса</b><i>Каждый пост — только после согласования</i></span><input type="checkbox" data-field="business_mode"></label>
+        <p class="hint">Заполните досье и сохраните его. Сведения используются ИИ для подготовки черновиков. Не добавляйте пароли и конфиденциальные данные.</p>
+        <label class="label">Название компании<input data-business="name" maxlength="3000" placeholder="Например, DOBRA Group"></label>
+        <label class="label">Сайт компании<input data-business="website" maxlength="500" placeholder="https://example.ru" type="url"></label>
+        <label class="label">Услуги и направления<textarea data-business="services" maxlength="3000" rows="3" placeholder="Чем занимается компания; приоритетные темы"></textarea></label>
+        <label class="label">Для кого пишем<textarea data-business="audience" maxlength="3000" rows="2" placeholder="Кто ваши клиенты и что им важно"></textarea></label>
+        <label class="label">География<input data-business="geography" maxlength="3000" placeholder="Города и регионы"></label>
+        <label class="label">Стиль общения<textarea data-business="tone" maxlength="3000" rows="2" placeholder="Например: от лица компании, понятно и без канцелярита"></textarea></label>
+        <label class="label">Подтверждённые факты и проекты<textarea data-business="facts" maxlength="3000" rows="3" placeholder="Только сведения, которые можно публиковать"></textarea></label>
+        <label class="label">Ограничения<textarea data-business="restrictions" maxlength="3000" rows="2" placeholder="Что нельзя упоминать, обещать или рекламировать"></textarea></label>
+        <button id="saveBusiness" class="accent wide">Сохранить досье</button>
+        <label class="row"><span><b>Предлагать пост каждый день</b><i>Не больше 5 черновиков в ожидании. Публикация — только вручную.</i></span><input type="checkbox" data-field="business_auto"></label>
+        <label class="label">Новость компании или тема<textarea id="businessBrief" maxlength="4000" rows="3" placeholder="Расскажите, что произошло, или оставьте пустым — редактор предложит полезный материал"></textarea></label>
+        <label class="label">Страница с материалом<input id="businessUrl" maxlength="1000" type="url" placeholder="https://… (необязательно)"></label>
+        <p class="hint">Читаем указанную страницу или сайт из досье. Самостоятельный поиск по всему интернету пока не подключён. Реклама — только по вашему запросу.</p>
+        <button id="generateBusiness" class="accent wide">Подготовить на согласование</button>
+        <p id="businessStatus" class="hint" role="status">Готовые черновики появятся во вкладке «Посты».</p>
+      </div>
+    </details>
     <details class="card group" open>
       <summary><span>Публикация</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
