@@ -39,5 +39,29 @@ vm.runInContext(readFileSync('app/miniapp/app.js','utf8').replace(/^start\(\);$/
   assert.equal(requests.length,2);
   assert.equal(requests[0].body.instructions,'first');
   assert.equal(requests[1].body.instructions,'second');
+  await vm.runInContext(`(async()=>{
+    let calls = 0;
+    api = async () => { calls++; return {
+      system: {cpu: 5, ram_percent: 20, ram_used: 1, ram_total: 5,
+        disk_percent: 10, disk_used: 2, disk_total: 20, process_mb: 180,
+        activity: 'Ожидание', last_error: '<script>bad</script>'},
+      capacity: {users: 30, channels: 120, active_channels: 100, database_bytes: 1048576},
+      queue: {new: 3, pending: 2, ready: 1, publishing: 0, attention: 1},
+    }; };
+    adminOpen = false;
+    await refreshAdminMonitoring(); assert.equal(calls, 0);
+    adminOpen = true; document.hidden = true;
+    await refreshAdminMonitoring(); assert.equal(calls, 0);
+    document.hidden = false;
+    await Promise.all([refreshAdminMonitoring(), refreshAdminMonitoring()]);
+    assert.equal(calls, 1);
+    assert.ok($('#adminMonitoring').innerHTML.includes('120'));
+    assert.ok(!$('#system').innerHTML.includes('<script>'));
+    assert.equal(monitoringBusy, false);
+    api = async () => { throw Error('offline'); };
+    await refreshAdminMonitoring();
+    assert.ok($('#adminUpdated').textContent.includes('offline'));
+    assert.equal(monitoringBusy, false);
+  })()`, context);
   console.log('UI state: stale reads, ordered saves, channel lock and safe links passed');
 })().catch(error=>{console.error(error); process.exitCode=1});

@@ -11,6 +11,17 @@ from app.config import DATABASE_URL, DEFAULT_DAILY_LIMIT
 log = logging.getLogger("db")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS service_api_keys (
+  id BIGSERIAL PRIMARY KEY,
+  label TEXT NOT NULL,
+  secret TEXT NOT NULL UNIQUE,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  cooldown_until TIMESTAMPTZ,
+  last_error TEXT,
+  last_used_at TIMESTAMPTZ,
+  last_success_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS users (
   tg_id       BIGINT PRIMARY KEY,
   username    TEXT,
@@ -62,6 +73,7 @@ CREATE TABLE IF NOT EXISTS channels (
   signature_text TEXT    NOT NULL DEFAULT '',
   signature_url  TEXT    NOT NULL DEFAULT '',
   watermark      INTEGER NOT NULL DEFAULT 0,
+  watermark_position TEXT NOT NULL DEFAULT 'bottom-right',
   logo_path      TEXT,
   gemini_key     TEXT,
   voice_sample   TEXT,
@@ -111,6 +123,8 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_channel_status ON posts(channel_id, status);
 CREATE INDEX IF NOT EXISTS idx_posts_uid ON posts(channel_id, uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at);
+CREATE INDEX IF NOT EXISTS idx_posts_work ON posts(status,channel_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_fingerprint ON posts(channel_id,id DESC) WHERE fingerprint IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS delivery_attempts (
   id BIGSERIAL PRIMARY KEY,
@@ -167,6 +181,7 @@ CREATE TABLE IF NOT EXISTS kv (
 # Columns added after the first Postgres release. CREATE TABLE IF NOT EXISTS never alters an
 # existing table, so anything new has to be listed here as well as in SCHEMA above.
 MIGRATIONS: list[tuple[str, str, str]] = [
+    ('channels', 'watermark_position', "TEXT NOT NULL DEFAULT 'bottom-right'"),
     ("users", "max_channels", "INTEGER NOT NULL DEFAULT 1"),
     ("users", "access_until", "TIMESTAMPTZ"),
     ("users", "promo_code", "TEXT"),

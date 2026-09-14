@@ -87,6 +87,9 @@ async def fetch(url: str, *, max_bytes: int = 2 * 1024 * 1024,
                         url = str(target.join(headers["location"]))
                         continue
                     content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                    # Distinguish expired links / 429 from an actual unsupported file.
+                    if response.status >= 400:
+                        httpx.Response(response.status, request=httpx.Request('GET', target)).raise_for_status()
                     if allowed_types and content_type not in allowed_types:
                         raise UnsafeURL("неподдерживаемый тип содержимого")
                     if headers.get("content-encoding", "identity").lower() != "identity":

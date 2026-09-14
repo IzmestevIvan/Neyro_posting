@@ -1,4 +1,6 @@
 import html
+import asyncio
+import io
 import json
 import logging
 import re
@@ -19,10 +21,9 @@ from aiogram.types import (
 
 from app import db
 from app.ai import gemini, pipeline
-from app.bot.cards import card_text, moderation_keyboard
 from app.api.auth import has_access
 from app.config import ADMIN_IDS, LOGO_DIR, PUBLIC_URL
-from app.core import access, publisher
+from app.core import access, publisher, watermark, runtime
 from app.sources import telegram_web, web
 
 log = logging.getLogger("bot")
@@ -32,6 +33,8 @@ router = Router()
 
 class AccessMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
+        if isinstance(event, Message) and event.chat.type != 'private':
+            return
         text = (getattr(event, "text", None) or "").split()
         command = text[0].split("@", 1)[0] if text else ""
         if isinstance(event, Message) and command in ("/start", "/id", "/help"):
@@ -39,6 +42,10 @@ class AccessMiddleware(BaseMiddleware):
         user = getattr(event, "from_user", None)
         if not user or not await access.owner_has_access(user.id):
             await event.answer("Доступ закрыт или истёк. Откройте панель для активации промокода.")
+            return
+        from app.core.rate_limit import admit
+        if not admit((user.id, 'bot'), 10):
+            await event.answer('Слишком много действий. Повторите через минуту.')
             return
         return await handler(event, data)
 
@@ -56,7 +63,7 @@ async def ensure_user(message: Message) -> dict:
     if existing:
         return existing
     await db.execute(
-        "INSERT INTO users (tg_id, username, first_name, is_admin, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO users (tg_id, username, first_name, is_admin, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(tg_id) DO NOTHING",
         (user.id, user.username, user.first_name, int(user.id in ADMIN_IDS), db.utcnow()),
     )
     return await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (user.id,))
@@ -89,6 +96,9 @@ def miniapp_markup() -> Optional[InlineKeyboardMarkup]:
 async def cmd_start(message: Message) -> None:
     user = await ensure_user(message)
     markup = miniapp_markup()
+    if has_access(user) and (message.text or '').split(maxsplit=1)[-1] == 'add_source':
+        await message.answer("Перешлите сюда пост публичного канала. Затем нажмите «Добавить канал как источник» и выберите свой канал назначения. Если пересылка скрывает автора — вставьте ссылку в разделе «Источники» панели.", reply_markup=markup)
+        return
 
     if not has_access(user):
         text = (
@@ -215,20 +225,31 @@ async def on_forward_action(callback: CallbackQuery, bot: Bot) -> None:
         await callback.message.answer("Источник добавлен." if added else "Этот источник уже есть в канале.")
 
 
-@router.message((F.photo | F.video), F.caption)
+@router.message(F.document.mime_type == 'image/png')
+@router.message((F.photo | F.video | F.document), F.caption)
 async def on_logo(message: Message, bot: Bot) -> None:
     if not any(word in (message.caption or "").lower() for word in LOGO_WORDS):
+        if message.document:
+            return await message.answer('Для логотипа пришлите PNG как файл с подписью «логотип», либо загрузите его в настройках приложения.')
         return await on_manual(message, bot)
-    if not message.photo:
-        return await message.answer("Для водяного знака пришлите картинку, а не видео.")
+    if not message.document or message.document.mime_type != 'image/png':
+        return await message.answer('Пришлите PNG как файл (не как фото) с подписью «логотип»: так сохранится прозрачный фон.')
+    if not message.document.file_size or message.document.file_size > 4 * 1024 * 1024:
+        return await message.answer('Максимальный размер логотипа — 4 МБ.')
     channel = await active_channel(message.from_user.id)
     if not channel:
         return await message.answer("Сначала добавьте канал в панели.")
     path = LOGO_DIR / f"{channel['id']}.png"
-    await bot.download(message.photo[-1], destination=path)
-    await db.execute(
-        "UPDATE channels SET logo_path = ?, watermark = 1 WHERE id = ?", (str(path), channel["id"])
-    )
+    content = io.BytesIO()
+    await bot.download(message.document, destination=content)
+    async with runtime.channel_lock(channel['id']):
+        try:
+            await asyncio.to_thread(watermark.save_logo, content.getvalue(), path)
+        except (ValueError, OSError):
+            return await message.answer('Не удалось прочитать PNG. Нужен непустой логотип до 4 миллионов пикселей.')
+        await db.execute(
+            "UPDATE channels SET logo_path = ?, watermark = 1 WHERE id = ?", (str(path), channel["id"])
+        )
     await message.answer("Логотип сохранён, водяной знак включён.")
 
 
@@ -288,6 +309,7 @@ async def on_manual(message: Message, bot: Bot) -> None:
     try:
         text, media, url, source_title = await _build_manual_post(raw)
     except Exception as exc:
+        log.warning('Не удалось прочитать ручной материал', exc_info=True)
         return await notice.edit_text(f"Не получилось: {exc}")
 
     # file_id, not the download URL — that URL embeds the bot token and would be
@@ -333,12 +355,9 @@ async def on_manual(message: Message, bot: Bot) -> None:
     if result.ai_requests:
         await db.bump_stat(channel["id"], db.utcnow().date(), "ai_requests", result.ai_requests)
 
-    post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post_id,))
     await notice.edit_text(
-        card_text(post, channel),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=moderation_keyboard(post_id),
+        "Пост подготовлен. Он находится в приложении: «Посты» → «На проверке».",
+        reply_markup=miniapp_markup(),
     )
     await db.execute(
         "UPDATE posts SET mod_message_id = ? WHERE id = ?", (notice.message_id, post_id)
@@ -371,14 +390,11 @@ async def on_edit_reply(message: Message, bot: Bot) -> None:
         return await message.reply("Правка не прошла проверку фактов. Предыдущий текст сохранён.")
     if not await publisher.replace_draft(post, updated, check):
         return await message.reply("Пост уже изменён или опубликован. Обновите ленту.")
-    post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post["id"],))
     await bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=target,
-        text=card_text(post, channel),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=moderation_keyboard(post["id"]),
+        text="Пост обновлён. Проверьте результат в приложении: «Посты» → «На проверке».",
+        reply_markup=miniapp_markup(),
     )
     await message.reply("Переписал.")
 
@@ -423,12 +439,9 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
             return await callback.message.answer(f"Не прошло проверку: {result.reason}")
         if not await publisher.replace_draft(post, result.text, result.fact_check, needs_review=result.needs_review):
             return await callback.message.answer("Пост уже изменён или опубликован. Обновите ленту.")
-        post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post_id,))
         return await callback.message.edit_text(
-            card_text(post, channel),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=moderation_keyboard(post_id),
+            "Пост переписан. Проверьте результат в приложении: «Посты» → «На проверке».",
+            reply_markup=miniapp_markup(),
         )
 
     if await publisher.quota_left(post["owner_id"]) <= 0:
@@ -437,8 +450,8 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer("Публикую…")
     try:
         await publisher.publish_post(bot, post, channel)
-    except publisher.AlreadyPublished:
-        return await callback.message.edit_text("✅ Опубликовано")
+    except publisher.AlreadyPublished as exc:
+        return await callback.message.answer(str(exc))
     except Exception as exc:
         log.warning("не удалось опубликовать пост %s", post_id, exc_info=True)
         return await callback.message.answer(f"Не удалось опубликовать: {exc}")

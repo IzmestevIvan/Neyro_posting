@@ -2,7 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from app.core.scheduler import _pick_new, in_window, next_window_start
+from app.core.scheduler import _chronological, _pick_new, in_window, next_window_start
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -79,3 +79,10 @@ def test_unknown_last_uid_falls_back_to_recent_tail():
 def test_empty_source_is_safe():
     assert _pick_new([], None) == []
     assert _pick_new([], "c/1") == []
+
+
+def test_source_items_are_normalized_to_chronological_order():
+    first = SimpleNamespace(uid="first", date="2026-09-07T10:00:00+00:00")
+    last = SimpleNamespace(uid="last", date="2026-09-07T12:00:00+00:00")
+    unknown = SimpleNamespace(uid="unknown", date=None)
+    assert [item.uid for item in _chronological([last, unknown, first])] == [unknown.uid, first.uid, last.uid]

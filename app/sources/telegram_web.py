@@ -1,4 +1,5 @@
 import re
+import asyncio
 import statistics
 from dataclasses import dataclass, field
 from typing import Optional
@@ -107,17 +108,26 @@ def normalize_ref(ref: str) -> str:
 
 async def fetch(client: httpx.AsyncClient, ref: str) -> tuple[list[RawItem], Optional[str]]:
     username = normalize_ref(ref)
-    resp = await client.get(
-        f"https://t.me/s/{username}",
-        headers={"User-Agent": UA, "Accept-Language": "ru,en;q=0.8"},
-        follow_redirects=True,
-        timeout=25,
-    )
-    resp.raise_for_status()
-    items, title = parse_channel_page(resp.text)
-    if not items and "tgme_channel_info" not in resp.text:
+    if not re.fullmatch(r'[A-Za-z0-9_]{4,32}', username):
+        raise ValueError('Укажите публичный @username канала')
+    page = await _read_page(client, f'https://t.me/s/{username}')
+    items, title = parse_channel_page(page)
+    if not items and "tgme_channel_info" not in page:
         raise ValueError("канал не найден или закрыт предпросмотр")
     return items, title
+
+
+async def _read_page(client, url, params=None):
+    async with asyncio.timeout(25):
+        async with client.stream('GET', url, params=params, follow_redirects=True, timeout=20,
+                                 headers={'User-Agent':UA,'Accept-Language':'ru,en;q=0.8'}) as response:
+            response.raise_for_status()
+            data = bytearray()
+            async for chunk in response.aiter_bytes(65536):
+                data.extend(chunk)
+                if len(data)>2*1024*1024:
+                    raise ValueError('Страница источника превышает 2 МиБ')
+            return data.decode('utf-8',errors='replace')
 
 
 POST_LINK = re.compile(r"^(?:https?://)?(?:www\.)?t\.me/(?:s/)?([A-Za-z0-9_]+)/(\d+)", re.I)
@@ -129,15 +139,10 @@ def parse_post_link(url: str) -> Optional[tuple[str, int]]:
 
 
 async def fetch_single(client: httpx.AsyncClient, username: str, post_id: int) -> Optional[RawItem]:
-    resp = await client.get(
-        f"https://t.me/{username}/{post_id}",
-        params={"embed": "1"},
-        headers={"User-Agent": UA},
-        follow_redirects=True,
-        timeout=25,
-    )
-    resp.raise_for_status()
-    items, _ = parse_channel_page(resp.text)
+    if not re.fullmatch(r'[A-Za-z0-9_]{4,32}', username):
+        raise ValueError('Некорректное имя канала')
+    page = await _read_page(client, f'https://t.me/{username}/{post_id}', params={'embed':'1'})
+    items, _ = parse_channel_page(page)
     return items[0] if items else None
 
 

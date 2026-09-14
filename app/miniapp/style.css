@@ -79,7 +79,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .select-wrap.compact { flex: none; }
 .select-wrap.compact select { background: var(--surface-3); border-color: transparent; padding: 9px 30px 9px 12px; }
 
-button { font: inherit; color: var(--text); border: none; border-radius: var(--r-sm); cursor: pointer;
+button { font: inherit; color: var(--text); background: var(--surface-2); -webkit-appearance: none; appearance: none; border: none; border-radius: var(--r-sm); cursor: pointer;
          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
          white-space: nowrap; }
 button:active { transform: scale(.985); }
@@ -440,3 +440,11 @@ body.tour-open { overflow:hidden; }
 .copy-source small { display:block; opacity:.65; margin-top:4px; }
 
 .copy-content { padding:0 16px 16px; }
+
+.source-shortcuts { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+.source-shortcuts button { flex:1 1 140px; min-height:44px; }
+.source-shortcuts .ghost { color:var(--text); background:var(--surface-2); border-color:var(--line); }
+.source-shortcuts button:not(:disabled):hover { filter:brightness(1.12); }
+#sourceBatchPanel { padding-top:16px; margin-bottom:16px; }
+#sourceBatchInput { display:block; width:100%; margin-top:10px; resize:vertical; }
+#sourceBatchStatus { overflow-wrap:anywhere; margin-top:12px; font-size:13px; }

@@ -16,6 +16,7 @@ class Result:
     fact_check: Optional[dict] = None
     ai_requests: int = 0
     warnings: list[str] = field(default_factory=list)
+    retryable: bool = False
     needs_review: bool = False
     is_ad: bool = False
     ad_score: int = 0
@@ -74,7 +75,7 @@ async def process(
         except gemini.NoKeyError:
             raise
         except gemini.AIError as exc:
-            return Result(False, reason="триаж недоступен — публикация заблокирована", ai_requests=calls)
+            return Result(False, reason="триаж недоступен — ожидает повторной проверки", retryable=True, ai_requests=calls)
 
     deep = quality == "super"
     rewritten = await gemini.generate(
@@ -94,7 +95,7 @@ async def process(
     check = await _factcheck(text, rewritten, api_key)
     calls += 1
     if check is None:
-        return Result(False, reason="фактчек недоступен — публикация заблокирована", ai_requests=calls, warnings=["фактчек недоступен"])
+        return Result(False, reason="фактчек недоступен — ожидает повторной проверки", retryable=True, ai_requests=calls, warnings=["фактчек недоступен"])
 
     if check["ok"] is not True:
         retry = await gemini.generate(
@@ -114,6 +115,8 @@ async def process(
         calls += 1
         if recheck is not None and recheck.get("ok"):
             return Result(True, text=retry.strip(), fact_check=recheck, ai_requests=calls, needs_review=needs_review)
+        if recheck is None:
+            return Result(False, reason="повторный фактчек недоступен — ожидает повторной проверки", retryable=True, ai_requests=calls)
         issues = (check.get("hallucinations") or []) + (check.get("distortions") or [])
         return Result(
             False,
@@ -133,7 +136,7 @@ async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> O
             system=prompts.FACTCHECK_SYSTEM,
             model=gemini.verify_model(),
             temperature=0.1,
-            allow_fallback=False,
+            allow_fallback=True,
         )
         if (type(check.get("ok")) is not bool
                 or not isinstance(check.get("hallucinations"), list)

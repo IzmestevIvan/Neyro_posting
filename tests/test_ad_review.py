@@ -52,7 +52,8 @@ async def test_uncertain_material_does_not_autopublish_or_digest(store, channel,
     saved = await store.fetch_one('SELECT * FROM posts WHERE id = ?', (post_id,))
     assert saved['status'] == 'pending'
     assert 'ручная проверка' in saved['reason']
-    send.assert_awaited_once()
+    # Autopost review exceptions stay in the panel without a private-message flood.
+    send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

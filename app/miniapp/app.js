@@ -15,6 +15,8 @@ const PACE_LABELS = [['as_they_come', 'Как приходят'], ['3', '3 в д
 let boot = null;
 let channel = null;
 let page = 'home';
+let adminOpen = false;
+let monitoringBusy = false;
 let saveQueue = Promise.resolve();
 let savingCount = 0;
 const revisions = {};
@@ -88,11 +90,11 @@ function renderStats(stats) {
     ['', stats.subscribers || '—', 'подписчики'],
     ['', stats.remaining, 'постов осталось · все каналы'],
   ];
-  const ready = stats.ready || 0;
-  $('#publishNow').disabled = publishingNow || !ready || stats.remaining <= 0;
-  $('#publishHint').textContent = stats.remaining <= 0 ? 'Дневной лимит исчерпан. Готовые посты останутся в очереди.'
-    : !ready ? 'Готовых постов пока нет. Добавьте источники или отправьте текст боту.'
-    : `Готово: ${ready}. Кнопка отправит один пост сразу, минуя расписание и паузу.`;
+  $('#publishNow').disabled = publishingNow || !stats.sources || stats.remaining <= 0;
+  $('#publishHint').textContent = publishingNow ? 'Проверяю источники и готовлю один свежий пост…'
+    : stats.remaining <= 0 ? 'Дневной лимит исчерпан.'
+    : !stats.sources ? 'Добавьте источник, чтобы подготовить свежий пост.'
+    : 'Найдёт свежий материал, проверит и опубликует один пост сейчас, вне расписания. Старые новости не отправляет.';
   const next = !stats.sources ? ['Подключите первый источник', 'Добавьте канал или RSS-ленту, чтобы получать материалы.', 'sources', 'Добавить источник']
     : stats.paused ? ['Сбор материалов на паузе', 'Чтобы получать новые материалы, снимите паузу в настройках.', 'settings', 'Открыть настройки']
     : stats.pending ? ['Есть материалы для проверки', 'Прочитайте текст и вердикт проверки перед публикацией.', 'feed', 'Проверить посты']
@@ -105,12 +107,23 @@ function renderStats(stats) {
 
   const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   $('#status').textContent = `${stats.paused ? 'на паузе' : 'работает'} · ${stats.mode} · ${time}`;
+  const waiting = stats.waiting || {};
+  const details = [];
+  if (waiting.last_published_at) details.push(`Последняя публикация: ${ago(waiting.last_published_at)}.`);
+  if (waiting.next_at) details.push(`Ближайший срок в очереди: ${new Date(waiting.next_at).toLocaleString('ru-RU')}.`);
+  if (waiting.digest) details.push(`В дайджесте: ${waiting.digest}, время выпуска — ${channel.digest_time} (${channel.tz}).`);
+  if (waiting.processing) details.push(`Ожидают обработки: ${waiting.processing}.`);
+  if (!stats.queued && stats.sources) details.push('Очередь пуста — ожидаем подходящие новости. Темп не гарантирует количество постов.');
+  if (stats.last_rejection) details.push(`Последний отсев (${ago(stats.last_rejection.created_at)}): ${stats.last_rejection.reason}.`);
+  if (details.length) {
+    const note = document.createElement('p');
+    note.className = 'hint'; note.textContent = details.join(' ');
+    $('#nextStep').appendChild(note);
+  }
 
   drawChart('#postsChart', stats.posts_chart, false);
   drawChart('#subsChart', stats.subscribers_chart, true);
   // Блок системы приходит только администратору; у остальных его просто нет.
-  $('#systemBlock').hidden = !stats.system;
-  if (stats.system) renderSystem(stats.system);
   setBadge('#feedBadge', stats.pending);
   $('#pendingCount').textContent = stats.pending;
 }
@@ -142,12 +155,14 @@ function renderSystem(sys) {
   if (last) bits.push(`Последний пост: ${last}`);
   if (sys.model_cooldown) bits.push(`осн. модель ещё ${sys.model_cooldown} мин`);
   if (bits.length) lines.push(['inbox', bits.join(' · ')]);
-  if (sys.last_error) lines.push(['alert', esc(sys.last_error)]);
+  if (sys.last_error) lines.push(['alert', `Последняя записанная ошибка: ${esc(sys.last_error)}`]);
+  lines.push(['inbox', `Память приложения: ${sys.process_mb} МБ`]);
 
-  const ramPercent = sys.ram_total ? Math.round((sys.ram_used / sys.ram_total) * 100) : 0;
+  const ramPercent = sys.ram_percent;
   $('#system').innerHTML = `
     <div class="meter"><span class="name">CPU</span><span class="track"><span class="fill" style="width:${sys.cpu}%"></span></span><span>${sys.cpu}%</span></div>
     <div class="meter"><span class="name">RAM</span><span class="track"><span class="fill" style="width:${ramPercent}%"></span></span><span>${sys.ram_used}/${sys.ram_total} ГБ</span></div>
+    <div class="meter"><span class="name">Диск</span><span class="track"><span class="fill" style="width:${sys.disk_percent}%"></span></span><span>${sys.disk_used}/${sys.disk_total} ГБ</span></div>
     ${lines.map(([ico, text]) => `<p>${icon(ico)}<span>${text}</span></p>`).join('')}`;
 }
 
@@ -281,6 +296,51 @@ $('#ads').addEventListener('click', async (event) => {
 
 /* ---------- sources ---------- */
 
+let sourceBatchRunning = false;
+let sourceBatchCancelled = false;
+$('#sourceBatchOpen').addEventListener('click', () => {
+  $('#sourceBatchPanel').hidden = false;
+  $('#sourceBatchInput').focus();
+});
+$('#sourceCopyOpen').addEventListener('click', () => {
+  $('#copySourcesPanel').open = true;
+  $('#copyFromChannel').focus();
+});
+$('#sourceBotOpen').addEventListener('click', () => {
+  if (!/^[a-zA-Z0-9_]+$/.test(boot?.bot_username || '')) return toast('Не удалось получить адрес бота', true);
+  const url = `https://t.me/${boot.bot_username}?start=add_source`;
+  if (tg?.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url, '_blank', 'noopener,noreferrer');
+});
+$('#sourceBatchCancel').addEventListener('click', () => { sourceBatchCancelled = true; });
+$('#sourceBatchAdd').addEventListener('click', async () => {
+  if (!channel || sourceBatchRunning) return;
+  const refs = [...new Set($('#sourceBatchInput').value.trim().split(/\s+/).filter(Boolean))];
+  if (!refs.length || refs.length > 20) return toast('Вставьте от 1 до 20 адресов, по одному на строку', true);
+  const target = channel.id;
+  const results = [];
+  sourceBatchRunning = true; sourceBatchCancelled = false;
+  $('#sourceBatchAdd').disabled = true;
+  $('#sourceBatchCancel').hidden = false;
+  $('#sourceBatchStatus').textContent = 'Проверяю источники…';
+  try {
+    for (const ref of refs) {
+      if (sourceBatchCancelled || channel?.id !== target) break;
+      try {
+        const result = await api(`/channels/${target}/sources`, {method:'POST', body:JSON.stringify({ref})});
+        results.push({ref, ok:true, text:result.already_exists ? 'Уже добавлен' : 'Добавлен'});
+      } catch (error) { results.push({ref, ok:false, text:error.message}); }
+      $('#sourceBatchStatus').innerHTML = results.map(r => `<p><b>${esc(r.ref)}</b><br>${esc(r.text)}</p>`).join('');
+    }
+    $('#sourceBatchInput').value = refs.filter(ref => !results.some(r => r.ref === ref && r.ok)).join('\n');
+    if (channel?.id === target) await loadSources();
+  } finally {
+    sourceBatchRunning = false;
+    $('#sourceBatchAdd').disabled = false;
+    $('#sourceBatchCancel').hidden = true;
+  }
+});
+
 function resetSourceCopy() {
   $('#copySourcesPanel').open = false;
   $('#copyFromChannel').innerHTML = '<option value="">Выберите канал</option>' +
@@ -386,10 +446,12 @@ $('#addSource').addEventListener('click', async () => {
 
 function fillSettings() {
   if (!channel) return;
+  $('#logoStatus').textContent = channel.logo_configured ? 'Логотип сохранён.' : 'Логотип пока не загружен.';
   $$('[data-field]').forEach((el) => {
     const value = drafts.get(`${channel.id}:${el.dataset.field}`) ?? channel[el.dataset.field];
     if (el.type === 'checkbox') el.checked = !!value;
     else el.value = value ?? '';
+    if (el.dataset.field === 'gemini_key') el.placeholder = channel.gemini_key_configured ? 'Ключ сохранён. Введите новый для замены' : 'Общий ключ сервиса';
   });
   $('#quality').value = QUALITY.indexOf(channel.quality);
   updateQualityLabel();
@@ -521,14 +583,62 @@ $('#deleteChannel').addEventListener('click', async () => {
   }
 });
 
+$('#logoUpload').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file || !channel) return;
+  const id = channel.id;
+  event.target.disabled = true;
+  try {
+    if (file.size > 4 * 1024 * 1024 || !/\.png$/i.test(file.name)) throw new Error('Выберите PNG до 4 МБ');
+    await saveQueue;
+    const updated = await api(`/channels/${id}/logo`, {method: 'POST', headers: {'Content-Type': 'image/png'}, body: file});
+    if (channel?.id === id) {
+      channel.logo_configured = updated.logo_configured;
+      channel.watermark = updated.watermark;
+      fillSettings();
+      toast('PNG сохранён, водяной знак включён');
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    event.target.disabled = false;
+    event.target.value = '';
+  }
+});
+
 /* ---------- admin ---------- */
 
+async function refreshAdminMonitoring() {
+  if (!adminOpen || monitoringBusy || document.hidden) return;
+  monitoringBusy = true;
+  try {
+    const data = await api('/admin/monitoring');
+    if (!adminOpen) return;
+    renderSystem(data.system);
+    const c = data.capacity, q = data.queue;
+    $('#adminMonitoring').innerHTML = [
+      [c.users, 'пользователей'], [c.channels, 'каналов'],
+      [c.active_channels, 'каналов без паузы'],
+      [Math.round(c.database_bytes / 1024 ** 2), 'МБ в базе'],
+      [q.new, 'ожидают обработки'], [q.pending, 'на модерации'],
+      [q.ready, 'готовы / в дайджесте'], [q.publishing, 'публикуются'],
+      [q.attention, 'требуют проверки доставки'],
+    ].map(([v, label]) => `<div class="stat"><b>${Number(v) || 0}</b><i>${label}</i></div>`).join('');
+    $('#adminUpdated').textContent = `Обновлено: ${new Date().toLocaleTimeString('ru-RU')}`;
+  } catch (error) {
+    if (adminOpen) $('#adminUpdated').textContent = `Не удалось обновить показатели: ${error.message}. Показаны последние полученные данные.`;
+  } finally {
+    monitoringBusy = false;
+  }
+}
+
 async function loadAdmin() {
+  await loadApiKeys();
   const data = await api('/admin/overview');
   const { totals } = data;
   $('#adminTotals').innerHTML = [
-    ['', totals.posts, 'постов всего'],
-    ['ok', totals.published, 'опубликовано'],
+    ['', totals.posts, 'постов в базе'],
+    ['ok', totals.published, 'опубликовано в базе'],
     ['accent-t', totals.ai_today, 'запросов ИИ'],
   ].map(([cls, v, l]) => `<div class="stat ${cls}"><b>${v ?? 0}</b><i>${l}</i></div>`).join('');
 
@@ -561,6 +671,38 @@ async function loadAdmin() {
 
   await loadPromoCodes();
 }
+
+async function loadApiKeys() {
+  const data = await api('/admin/api-keys');
+  $('#apiKeyStatus').textContent = `Сохранено ${data.keys.length}/${data.limit}. Ключ из настроек сервера: ${data.server_key_configured ? 'есть, используется как резерв' : 'не задан'}.`;
+  $('#apiKeyList').innerHTML = data.keys.map(k => {
+    const cooling = k.cooldown_until && new Date(k.cooldown_until) > new Date();
+    const state = !k.enabled ? 'Отключён' : cooling ? `Пауза до ${new Date(k.cooldown_until).toLocaleTimeString('ru-RU')}` : k.last_success_at ? 'Доступен для запросов' : 'Ожидает первого успешного запроса';
+    return `<div class="card"><b>${esc(k.label)}</b><p class="hint">${esc(state)}${k.last_error ? ' · ' + esc(k.last_error) : ''}</p><button class="ghost" data-key-toggle="${k.id}" data-enabled="${k.enabled}">${k.enabled ? 'Отключить' : 'Включить'}</button> <button class="danger" data-key-delete="${k.id}">Удалить</button></div>`;
+  }).join('');
+  $('#apiKeyList').querySelectorAll('button').forEach(button => button.addEventListener('click', async () => {
+    const remove = button.dataset.keyDelete;
+    if (remove && !window.confirm('Удалить этот ключ из пула? Для возврата потребуется вставить его заново.')) return;
+    button.disabled = true;
+    try {
+      await api(`/admin/api-keys/${remove || button.dataset.keyToggle}`, remove ? {method:'DELETE'} : {method:'PATCH', body:JSON.stringify({enabled:button.dataset.enabled !== 'true'})});
+      await loadApiKeys();
+    } catch (error) { toast(error.message, true); button.disabled = false; }
+  }));
+}
+
+$('#apiKeyAdd').addEventListener('click', async () => {
+  const input = $('#apiKeyInput'), button = $('#apiKeyAdd');
+  button.disabled = true;
+  try {
+    const result = await api('/admin/api-keys', {method:'POST', body:JSON.stringify({keys:input.value})});
+    input.value = '';
+    await loadApiKeys();
+    toast(`Добавлено ключей: ${result.added}`);
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
+$('#apiKeyRefresh').addEventListener('click', () => loadApiKeys().catch(error => toast(error.message, true)));
 
 async function loadPromoCodes() {
   const codes = await api('/admin/promo');
@@ -619,13 +761,16 @@ $('#promoCreate').addEventListener('click', async () => {
 });
 
 $('#openAdmin').addEventListener('click', () => {
+  adminOpen = true;
   $$('.page').forEach((s) => (s.hidden = s.id !== 'page-admin'));
   $('#nav').hidden = true;
   $('#channelBar').hidden = true;
   loadAdmin().catch((e) => toast(e.message, true));
+  refreshAdminMonitoring();
 });
 
 $('#closeAdmin').addEventListener('click', () => {
+  adminOpen = false;
   if (!boot.user.has_access) return showGate();
   if (!channel) return showOnboarding();
   $('#nav').hidden = false;
@@ -716,9 +861,10 @@ $('#publishNow').addEventListener('click', async () => {
   if (!channel) return;
   publishingNow = true;
   $('#publishNow').disabled = true;
+  $('#publishHint').textContent = 'Проверяю источники и готовлю один свежий пост…';
   try {
     await api(`/channels/${channel.id}/publish_now`, { method: 'POST' });
-    toast('Опубликовано');
+    toast('Свежий пост опубликован');
     refreshStats();
   } catch (error) {
     toast(error.message, true);
@@ -903,7 +1049,11 @@ async function start() {
   $('#openAdmin').hidden = !boot.user.is_admin;
   if (!tourSeen()) setupTour();
 
-  setInterval(() => page === 'home' && channel && refreshStats(), 15000);
+  setInterval(() => {
+    if (document.hidden) return;
+    if (adminOpen) refreshAdminMonitoring();
+    else if (page === 'home' && channel) refreshStats();
+  }, 15000);
 
   if (!boot.user.has_access) return showGate();
   if (!boot.channels.length) return showOnboarding();
@@ -913,7 +1063,7 @@ async function start() {
 }
 
 $('#nextStep').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });
-const HISTORY_LABELS = { published: 'Опубликован', failed: 'Ошибка публикации', filtered: 'Отфильтрован', duplicate: 'Дубликат', rejected: 'Отклонён', approved: 'В очереди', new: 'Обрабатывается', digest: 'В дайджесте', publishing: 'Отправляется', uncertain: 'Нужна сверка с каналом', partial: 'Отправлена только часть', digest_item: 'Включён в дайджест' };
+const HISTORY_LABELS = { expired: 'Устарел', published: 'Опубликован', failed: 'Ошибка публикации', filtered: 'Отфильтрован', duplicate: 'Дубликат', rejected: 'Отклонён', approved: 'В очереди', new: 'Обрабатывается', digest: 'В дайджесте', publishing: 'Отправляется', uncertain: 'Нужна сверка с каналом', partial: 'Отправлена только часть', digest_item: 'Включён в дайджест' };
 async function loadHistory() {
   if (!channel) return;
   const current = readTicket('history');

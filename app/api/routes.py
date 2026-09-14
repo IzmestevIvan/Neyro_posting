@@ -1,4 +1,6 @@
 import json
+import asyncio
+import logging
 import re
 from datetime import date, timedelta
 from typing import Any, Optional
@@ -8,7 +10,7 @@ import psutil
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from app import db
-from app.ai import gemini
+from app.ai import gemini, key_pool
 from app.api.auth import (
     active_user,
     current_user,
@@ -19,15 +21,17 @@ from app.api.auth import (
 )
 from app.config import (
     ADMIN_IDS,
+    LOGO_DIR,
     DELAY_MODES,
     LANGUAGES,
     PACE_MODES,
     TIMEZONES,
 )
-from app.core import promo, publisher, scheduler
+from app.core import promo, publisher, scheduler, watermark, runtime
 from app.sources import rss, telegram_web
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger('api')
 
 BOOL_FIELDS = {
     "autopost", "paused", "channel_voice", "hits_only", "media_only", "digest_enabled", "watermark",
@@ -35,6 +39,12 @@ BOOL_FIELDS = {
 TEXT_FIELDS = {"instructions", "stopwords", "signature_text", "signature_url", "gemini_key"}
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 QUALITY = {"fast", "balanced", "super"}
+
+
+def public_channel(channel: dict) -> dict:
+    return {**{k: v for k, v in channel.items() if k not in ('gemini_key','logo_path','voice_sample')},
+            'gemini_key_configured': bool(channel.get('gemini_key')),
+            'logo_configured': bool(channel.get('logo_path'))}
 
 
 def _clean_settings(payload: dict) -> dict:
@@ -45,8 +55,14 @@ def _clean_settings(payload: dict) -> dict:
                 raise HTTPException(422, f"{key}: ожидается переключатель true/false")
             out[key] = int(value)
         elif key in TEXT_FIELDS:
+            if not isinstance(value, str) or len(value) > 4000:
+                raise HTTPException(422, f'{key}: ожидается текст до 4000 символов')
+            if key == 'signature_url' and value and not re.match(r'^https?://[^\s<>"\x00-\x20]+$', value):
+                raise HTTPException(422, 'Ссылка подписи должна начинаться с https:// или http://')
             out[key] = str(value)[:4000]
         elif key == "delay_mode" and isinstance(value, str) and value in DELAY_MODES:
+            out[key] = value
+        elif key == 'watermark_position' and isinstance(value, str) and value in watermark.POSITIONS:
             out[key] = value
         elif key == "pace" and isinstance(value, str) and value in PACE_MODES:
             out[key] = value
@@ -101,7 +117,7 @@ async def bootstrap(request: Request, user: dict = Depends(current_user)) -> dic
             "has_access": has_access(user),
             "promo_code": user["promo_code"],
         },
-        "channels": channels,
+        "channels": [public_channel(c) for c in channels],
         "languages": LANGUAGES,
         "timezones": TIMEZONES,
         "delay_modes": list(DELAY_MODES),
@@ -113,7 +129,7 @@ async def bootstrap(request: Request, user: dict = Depends(current_user)) -> dic
 async def redeem_promo(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict:
     try:
         result = await promo.redeem(str(payload.get("code", "")), user["tg_id"])
-    except promo.PromoError as exc:
+    except (promo.PromoError, ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return result
 
@@ -147,20 +163,25 @@ async def add_channel(
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except Exception as exc:
+        log.warning('Не удалось проверить права канала', exc_info=True)
         raise HTTPException(502, "не удалось проверить права на канал; повторите позже") from exc
 
-    existing = await db.fetch_one(
-        "SELECT id FROM channels WHERE owner_id = ? AND chat_id = ?", (user["tg_id"], chat_id)
-    )
-    if existing:
-        raise HTTPException(400, "канал уже добавлен")
-
-    channel_id = await db.insert(
-        "INSERT INTO channels (owner_id, chat_id, username, title, created_at) VALUES (?, ?, ?, ?, ?)",
-        (user["tg_id"], chat_id, resolved or username, title, db.utcnow()),
-    )
+    pool = await db.connect()
+    async with pool.acquire() as conn, conn.transaction():
+        owner = await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1 FOR UPDATE', user['tg_id'])
+        if not owner or not has_access(dict(owner)):
+            raise HTTPException(403, 'Доступ закрыт')
+        await conn.execute('SELECT pg_advisory_xact_lock($1::bigint)', chat_id)
+        if await conn.fetchval('SELECT id FROM channels WHERE chat_id=$1', chat_id):
+            raise HTTPException(409, 'Этот канал уже подключён к сервису')
+        count = await conn.fetchval('SELECT count(*) FROM channels WHERE owner_id=$1', user['tg_id'])
+        if not is_admin(dict(owner)) and count >= owner['max_channels']:
+            raise HTTPException(403, 'Достигнут лимит каналов тарифа')
+        channel_id = await conn.fetchval(
+            'INSERT INTO channels(owner_id,chat_id,username,title,created_at) VALUES($1,$2,$3,$4,now()) RETURNING id',
+            user['tg_id'],chat_id,resolved or username,title)
     await db.set_kv(f"active:{user['tg_id']}", channel_id)
-    return await db.fetch_one("SELECT * FROM channels WHERE id = ?", (channel_id,))
+    return public_channel(await db.fetch_one("SELECT * FROM channels WHERE id = ?", (channel_id,)))
 
 
 @router.delete("/channels/{channel_id}")
@@ -186,13 +207,27 @@ async def update_channel(
     await db.execute(
         f"UPDATE channels SET {assignments} WHERE id = ?", (*fields.values(), channel_id)
     )
+    if any(fields.get(key) == 0 and channel[key] for key in ('hits_only', 'media_only')):
+        await scheduler.reconsider_filtered(channel_id)
     await db.set_kv(f"active:{user['tg_id']}", channel_id)
-    return await db.fetch_one("SELECT * FROM channels WHERE id = ?", (channel_id,))
+    return public_channel(await db.fetch_one("SELECT * FROM channels WHERE id = ?", (channel_id,)))
 
 
 @router.get("/channels/{channel_id}/stats")
 async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> dict:
     channel = await owned_channel(channel_id, user)
+
+    last_rejection = await db.fetch_one(
+        "SELECT reason, created_at FROM posts WHERE channel_id=? AND status='filtered' ORDER BY id DESC LIMIT 1",
+        (channel_id,),
+    )
+    waiting = await db.fetch_one(
+        "SELECT COUNT(*) FILTER(WHERE status='digest') AS digest, "
+        "COUNT(*) FILTER(WHERE status='new') AS processing, "
+        "MIN(publish_at) FILTER(WHERE status='approved') AS next_at, "
+        "MAX(published_at) FILTER(WHERE status='published') AS last_published_at "
+        "FROM posts WHERE channel_id=?", (channel_id,),
+    )
 
     # Lifetime counters come from stats_daily because old post rows get pruned; the queue
     # numbers come from posts, which is the live state.
@@ -205,7 +240,7 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         "SELECT "
         " COUNT(*) FILTER (WHERE status IN ('approved', 'pending', 'digest', 'new')) AS queued,"
         " COUNT(*) FILTER (WHERE status = 'pending') AS pending,"
-        " COUNT(*) FILTER (WHERE status IN ('approved', 'pending', 'digest', 'failed') "
+        " COUNT(*) FILTER (WHERE status IN ('approved', 'pending', 'digest') "
         " AND NULLIF(trim(text_out), '') IS NOT NULL) AS ready"
         " FROM posts WHERE channel_id = ?",
         (channel_id,),
@@ -238,6 +273,8 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
     )
 
     return {
+        'waiting': waiting,
+        'last_rejection': last_rejection,
         "published": (totals or {}).get("published") or 0,
         "today": (today_row or {}).get("published") or 0,
         "queued": (counts or {}).get("queued") or 0,
@@ -259,22 +296,65 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         "paused": bool(channel["paused"]),
         # Нагрузка сервера и состояние воркера — внутренняя кухня, клиенту она ни о чём не
         # говорит и лишний раз выдаёт устройство системы. Показываем только администратору.
-        "system": await _system_health() if is_admin(user) else None,
+        "system": None,
     }
 
 
 async def _system_health() -> dict:
     memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
     return {
         "cpu": psutil.cpu_percent(interval=None),
         "ram_used": round(memory.used / 1024**3, 1),
         "ram_total": round(memory.total / 1024**3, 1),
+        "ram_percent": memory.percent,
+        "disk_used": round(disk.used / 1024**3, 1),
+        "disk_total": round(disk.total / 1024**3, 1),
+        "disk_percent": disk.percent,
+        "process_mb": round(psutil.Process().memory_info().rss / 1024**2),
         "activity": scheduler.state["activity"],
         "polling": scheduler.state["polling"],
         "last_publish_at": await db.get_kv("last_publish_at"),
         "model_cooldown": await gemini.cooldown_left(),
         "last_error": scheduler.state["last_error"],
     }
+
+
+@router.post('/channels/{channel_id}/logo')
+async def upload_logo(channel_id: int, request: Request, user: dict = Depends(active_user)) -> dict:
+    await owned_channel(channel_id, user)
+    if request.headers.get('content-type', '').split(';')[0] != 'image/png':
+        raise HTTPException(422, 'Загрузите PNG-файл, чтобы сохранить прозрачность')
+    content = await request.body()
+    if len(content) > 4 * 1024 * 1024:
+        raise HTTPException(413, 'Максимальный размер PNG — 4 МБ')
+    path = LOGO_DIR / f'{channel_id}.png'
+    async with runtime.channel_lock(channel_id):
+        try:
+            await asyncio.to_thread(watermark.save_logo, content, path)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, 'Не удалось прочитать PNG: максимум 4 МБ / 4 миллиона пикселей, не полностью прозрачный') from exc
+        await db.execute('UPDATE channels SET logo_path=?, watermark=1 WHERE id=?', (str(path), channel_id))
+    return public_channel(await owned_channel(channel_id, user))
+
+
+@router.get("/admin/monitoring")
+async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
+    await require_admin(user)
+    queue = await db.fetch_one(
+        "SELECT COUNT(*) FILTER (WHERE status = 'new') AS new, "
+        "COUNT(*) FILTER (WHERE status = 'pending') AS pending, "
+        "COUNT(*) FILTER (WHERE status IN ('approved', 'digest')) AS ready, "
+        "COUNT(*) FILTER (WHERE status = 'publishing') AS publishing, "
+        "COUNT(*) FILTER (WHERE status IN ('uncertain', 'partial')) AS attention FROM posts"
+    )
+    capacity = await db.fetch_one(
+        "SELECT (SELECT COUNT(*) FROM users) AS users, "
+        "(SELECT COUNT(*) FROM channels) AS channels, "
+        "(SELECT COUNT(*) FROM channels WHERE paused = 0) AS active_channels, "
+        "pg_database_size(current_database()) AS database_bytes"
+    )
+    return {"system": await _system_health(), "queue": queue, "capacity": capacity}
 
 
 @router.get("/channels/{channel_id}/feed")
@@ -363,6 +443,7 @@ async def post_action(
         except publisher.AlreadyPublished as exc:
             raise HTTPException(409, str(exc)) from exc
         except Exception as exc:
+            log.warning('Не удалось опубликовать пост %s', post_id, exc_info=True)
             raise HTTPException(502, f"не удалось опубликовать: {exc}") from exc
         return {"ok": True}
 
@@ -374,30 +455,19 @@ async def publish_now(
     channel_id: int, request: Request, user: dict = Depends(active_user)
 ) -> dict:
     channel = await owned_channel(channel_id, user)
-    # Кнопка «Опубликовать сейчас» намеренно игнорирует паузу канала, окно публикации,
-    # задержку, темп и отложенный дайджест: пользователь нажал её сам и ждёт пост немедленно.
-    # Не игнорируется только дневной лимит — это условие тарифа, а не расписания.
-    post = await db.fetch_one(
-        "SELECT * FROM posts WHERE channel_id = ? AND status IN ('approved', 'pending', 'digest', 'failed') "
-        "AND NULLIF(trim(text_out), '') IS NOT NULL "
-        "ORDER BY status = 'approved' DESC, status = 'pending' DESC, id LIMIT 1",
-        (channel_id,),
-    )
-    if not post:
-        raise HTTPException(404, "нет готовых постов — дождитесь новых из источников")
-    if await publisher.quota_left(user["tg_id"]) <= 0:
+    if await publisher.quota_left(channel["owner_id"]) <= 0:
         raise HTTPException(429, "исчерпан дневной лимит")
     try:
-        await publisher.publish_post(request.app.state.bot, post, channel)
+        return await scheduler.publish_fresh_once(request.app.state.bot, channel)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except publisher.QuotaExceeded as exc:
         raise HTTPException(429, str(exc)) from exc
-    except publisher.DeliveryUncertain as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except publisher.AlreadyPublished as exc:
+    except (publisher.DeliveryUncertain, publisher.AlreadyPublished) as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(502, f"не удалось опубликовать: {exc}") from exc
-    return {"ok": True, "post_id": post["id"]}
+        log.warning('Публикация сейчас не выполнена: канал %s', channel_id, exc_info=True)
+        raise HTTPException(502, "Не удалось подготовить или отправить свежий пост. Попробуйте позже.") from exc
 
 
 @router.get("/channels/{channel_id}/sources")
@@ -421,6 +491,13 @@ async def add_source(
     kind = "rss" if is_rss else "tg"
     ref = ref if is_rss else telegram_web.normalize_ref(ref)
 
+    if len(ref) > 2048 or (not is_rss and not re.fullmatch(r"[A-Za-z0-9_]{4,32}", ref)):
+        raise HTTPException(422, "Некорректный адрес источника")
+    if not is_rss:
+        ref = ref.lower()
+    existing = await db.fetch_one("SELECT * FROM sources WHERE channel_id=? AND kind=? AND ref=?", (channel_id, kind, ref))
+    if existing:
+        return {**existing, "already_exists": True}
     title = None
     try:
         if is_rss:
@@ -429,16 +506,16 @@ async def add_source(
             async with httpx.AsyncClient() as client:
                 _, title = await telegram_web.fetch(client, ref)
     except Exception as exc:
+        log.warning('Источник недоступен при добавлении', exc_info=True)
         raise HTTPException(400, f"источник недоступен: {exc}") from exc
 
-    try:
-        source_id = await db.insert(
-            "INSERT INTO sources (channel_id, kind, ref, title, created_at) VALUES (?, ?, ?, ?, ?)",
-            (channel_id, kind, ref, title, db.utcnow()),
-        )
-    except Exception as exc:
-        raise HTTPException(400, "источник уже добавлен") from exc
-    return await db.fetch_one("SELECT * FROM sources WHERE id = ?", (source_id,))
+    source_id = await db.insert(
+        "INSERT INTO sources (channel_id, kind, ref, title, created_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(channel_id,kind,ref) DO NOTHING RETURNING id",
+        (channel_id, kind, ref, title, db.utcnow()),
+    )
+    result = await db.fetch_one("SELECT * FROM sources WHERE channel_id=? AND kind=? AND ref=?", (channel_id,kind,ref))
+    return {**result, "already_exists": source_id is None}
 
 
 @router.post("/channels/{channel_id}/sources/copy")
@@ -513,7 +590,7 @@ async def create_promo(payload: dict = Body(...), user: dict = Depends(current_u
             plan=str(payload.get("plan", "pro")),
             note=str(payload.get("note", "")) or None,
         )
-    except promo.PromoError as exc:
+    except (promo.PromoError, ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"codes": codes, "plans": promo.PLANS}
 
@@ -559,6 +636,45 @@ async def admin_overview(user: dict = Depends(current_user)) -> dict:
     }
 
 
+@router.get('/admin/api-keys')
+async def list_api_keys(user: dict = Depends(current_user)) -> dict:
+    await require_admin(user)
+    return {'keys': await key_pool.overview(), 'server_key_configured': bool(gemini.GEMINI_API_KEY), 'limit': key_pool.MAX_KEYS}
+
+
+@router.post('/admin/api-keys')
+async def add_api_keys(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict:
+    await require_admin(user)
+    raw = payload.get('keys')
+    if not isinstance(raw, str) or len(raw) > 4000:
+        raise HTTPException(422, 'Передайте ключи текстом, каждый с новой строки')
+    try:
+        added = await key_pool.add_many(raw)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {'added': added}
+
+
+@router.patch('/admin/api-keys/{key_id}')
+async def change_api_key(key_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict:
+    await require_admin(user)
+    enabled = payload.get('enabled')
+    if type(enabled) is not bool or set(payload) != {'enabled'}:
+        raise HTTPException(422, 'Передайте enabled: true или false')
+    changed = await db.update('UPDATE service_api_keys SET enabled=? WHERE id=?', (enabled, key_id))
+    if not changed:
+        raise HTTPException(404, 'Ключ не найден')
+    return {'ok': True}
+
+
+@router.delete('/admin/api-keys/{key_id}')
+async def remove_api_key(key_id: int, user: dict = Depends(current_user)) -> dict:
+    await require_admin(user)
+    if not await db.update('DELETE FROM service_api_keys WHERE id=?', (key_id,)):
+        raise HTTPException(404, 'Ключ не найден')
+    return {'ok': True}
+
+
 @router.post("/admin/users/{tg_id}")
 async def admin_update_user(
     tg_id: int, payload: dict = Body(...), user: dict = Depends(current_user)
@@ -566,9 +682,14 @@ async def admin_update_user(
     await require_admin(user)
     fields = {}
     if "daily_limit" in payload:
-        fields["daily_limit"] = max(0, int(payload["daily_limit"]))
+        value = payload['daily_limit']
+        if type(value) is not int or not 0 <= value <= 100000:
+            raise HTTPException(422, 'Дневной лимит: целое число от 0 до 100000')
+        fields["daily_limit"] = value
     if "blocked" in payload:
-        fields["blocked"] = int(bool(payload["blocked"]))
+        if type(payload['blocked']) is not bool:
+            raise HTTPException(422, 'blocked: ожидается true/false')
+        fields["blocked"] = int(payload["blocked"])
     if not fields:
         raise HTTPException(400, "нечего менять")
     assignments = ", ".join(f"{key} = ?" for key in fields)

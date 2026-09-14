@@ -167,23 +167,19 @@
     <button id="publishNow" class="accent wide tall">
       <svg class="ic"><use href="#i-bolt"/></svg> Опубликовать сейчас
     </button>
-    <p id="publishHint" class="hint action-hint">Публикует один готовый пост, минуя расписание. Лимит тарифа сохраняется.</p>
+    <p id="publishHint" class="hint action-hint">Подготовит один свежий пост из источников и опубликует сейчас, вне расписания.</p>
     <h3 class="section">Публикации · 7 дней</h3>
     <div id="postsChart" class="card chart"></div>
     <h3 class="section">Подписчики</h3>
     <div id="subsChart" class="card chart"></div>
-    <div id="systemBlock" hidden>
-      <h3 class="section">Система</h3>
-      <div id="system" class="card system"></div>
-    </div>
   </section>
 
   <!-- лента -->
   <section id="page-feed" class="page" hidden>
     <div class="workspace-intro"><span class="eyebrow">КОНТЕНТ</span><h2>Публикации</h2></div>
     <div class="feed-tabs" role="group" aria-label="Список публикаций"><button id="showPending" class="on" aria-pressed="true">На проверке <span id="pendingCount">0</span></button><button id="showHistory" aria-pressed="false">История</button></div>
-    <p class="hint">В чате с ботом ответьте на карточку своей правкой («короче», «без эмодзи») —
-      он перепишет. Ссылка или свой текст в чат — ручной пост.</p>
+    <p class="hint">Новости и ручные посты на проверке находятся здесь, без рассылки в личный чат.
+      Ссылку или свой текст можно отправить боту — подготовленный пост появится в приложении.</p>
     <div id="feed"></div><div id="history" hidden></div>
   </section>
 
@@ -199,6 +195,19 @@
   <section id="page-sources" class="page" hidden>
     <h3 class="section">Источники · <span id="sourcesCount">0</span></h3>
     <p class="hint">Откуда бот берёт новости: @канал, ссылка t.me или адрес RSS-ленты.</p>
+    <div class="source-shortcuts">
+      <button id="sourceBatchOpen" class="accent">Добавить списком</button>
+      <button id="sourceCopyOpen" class="ghost">Из моего канала</button>
+      <button id="sourceBotOpen" class="ghost">Переслать боту</button>
+    </div>
+    <div id="sourceBatchPanel" class="card copy-content" hidden>
+      <label for="sourceBatchInput">Вставьте до 20 каналов или RSS-ссылок</label>
+      <textarea id="sourceBatchInput" rows="5" placeholder="@channel_one&#10;https://t.me/channel_two&#10;https://example.com/rss"></textarea>
+      <p class="hint">По одному адресу на строку. Каждый источник проверим, повторы пропустим.</p>
+      <button id="sourceBatchAdd" class="accent">Проверить и добавить</button>
+      <button id="sourceBatchCancel" hidden>Остановить</button>
+      <div id="sourceBatchStatus" role="status" aria-live="polite"></div>
+    </div>
     <div class="addrow">
       <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss">
       <button id="addSource" aria-label="Добавить источник" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
@@ -307,16 +316,28 @@
         <div class="preview"><span id="sigPreview"></span></div>
         <button class="accent wide" data-save="signature">Сохранить подпись</button>
         <label class="row">
-          <span><b>Водяной знак</b><i>пришлите боту картинку с подписью «логотип»</i></span>
+          <span><b>Водяной знак</b><i>PNG с прозрачным фоном · только фотографии</i></span>
           <input type="checkbox" data-field="watermark">
         </label>
+        <label class="label" for="watermarkPosition">Положение логотипа</label>
+        <select id="watermarkPosition" data-field="watermark_position">
+          <option value="top-left">Слева сверху</option>
+          <option value="top-right">Справа сверху</option>
+          <option value="center">По центру</option>
+          <option value="bottom-left">Слева снизу</option>
+          <option value="bottom-right">Справа снизу</option>
+        </select>
+        <label class="label" for="logoUpload">Загрузить логотип PNG (до 4 МБ)</label>
+        <input id="logoUpload" type="file" accept="image/png,.png">
+        <p id="logoStatus" class="hint" aria-live="polite"></p>
+        <p class="hint">Прозрачный фон сохраняется. Логотип пропорционально уменьшается и размещается с отступом от края. Белый фон исходного файла автоматически не удаляется.</p>
       </div>
     </details>
 
     <details class="card group">
       <summary><span>Ключ Gemini</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
-        <p class="hint">Свой ключ — свои лимиты. Пусто — используется общий ключ сервера.</p>
+        <p class="hint">Сначала используется ваш ключ. Если он недоступен или исчерпал квоту, запрос перейдёт на ключ сервиса. Пусто — всегда используется ключ сервиса. Лимиты публикаций тарифа сохраняются.</p>
         <input type="password" data-field="gemini_key" placeholder="AIza…">
         <button class="accent wide" data-save="gemini_key">Сохранить ключ</button>
       </div>
@@ -343,6 +364,22 @@
     </div>
     <div id="adminTotals" class="grid"></div>
 
+    <h3 class="section">Сервер и обработка</h3>
+    <p id="adminUpdated" class="hint" aria-live="polite">Загрузка показателей…</p>
+    <div id="system" class="card system"></div>
+    <h3 class="section">Нагрузка и очередь · все каналы</h3>
+    <div id="adminMonitoring" class="grid"></div>
+    <p class="hint">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</p>
+
+    <h3 class="section">Ключи Gemini</h3>
+    <div class="card">
+      <p class="hint">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</p>
+      <textarea id="apiKeyInput" rows="3" autocomplete="off" spellcheck="false" placeholder="Вставьте ключи Gemini"></textarea>
+      <button id="apiKeyAdd" class="accent wide">Сохранить ключи</button>
+      <button id="apiKeyRefresh" class="ghost wide">Обновить статусы</button>
+      <p id="apiKeyStatus" class="hint" aria-live="polite"></p>
+      <div id="apiKeyList"></div>
+    </div>
     <h3 class="section">Промокоды</h3>
     <div class="card">
       <div class="promo-form">

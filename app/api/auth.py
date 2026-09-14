@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 from app import db
 from app.config import ADMIN_IDS, BOT_TOKEN, DEV_AUTH
@@ -17,7 +17,12 @@ def verify_init_data(init_data: str) -> dict:
     if not BOT_TOKEN:
         raise HTTPException(503, "сервер не настроен")
 
-    pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+    if len(init_data) > 16384:
+        raise HTTPException(401, 'слишком длинные данные авторизации')
+    fields = parse_qsl(init_data, keep_blank_values=True)
+    pairs = dict(fields)
+    if len(fields) != len(pairs):
+        raise HTTPException(401, 'повторяющиеся поля авторизации')
     received = pairs.pop("hash", None)
     if not received:
         raise HTTPException(401, "нет подписи")
@@ -32,16 +37,23 @@ def verify_init_data(init_data: str) -> dict:
         issued = int(pairs.get("auth_date", 0))
     except ValueError as exc:
         raise HTTPException(401, "испорченная метка времени") from exc
+    if issued > time.time() + 60:
+        raise HTTPException(401, 'метка времени из будущего')
     if time.time() - issued > MAX_AGE:
         raise HTTPException(401, "сессия устарела")
 
     try:
-        return json.loads(pairs["user"])
+        payload = json.loads(pairs["user"])
     except (KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(401, "нет данных пользователя") from exc
+    if not isinstance(payload, dict) or type(payload.get('id')) is not int or not 0 < payload['id'] < 2**63:
+        raise HTTPException(401, 'некорректные данные пользователя')
+    if any(payload.get(k) is not None and not isinstance(payload[k], str) for k in ('username','first_name')):
+        raise HTTPException(401, 'некорректное имя пользователя')
+    return payload
 
 
-async def current_user(x_init_data: str = Header(default="")) -> dict:
+async def current_user(x_init_data: str = Header(default=""), request: Request = None) -> dict:
     if DEV_AUTH and x_init_data.startswith("dev:"):
         tg_id = int(x_init_data.split(":", 1)[1])
         payload = {"id": tg_id, "first_name": "dev", "username": "dev"}
@@ -49,10 +61,16 @@ async def current_user(x_init_data: str = Header(default="")) -> dict:
         payload = verify_init_data(x_init_data)
 
     tg_id = payload["id"]
+    if request:
+        from app.core.rate_limit import admit
+        expensive = request.method == 'POST' and request.url.path.endswith(('/regen','/publish_now','/approve'))
+        kind, limit = ('ai', 6) if expensive else ('write', 30) if request.method != 'GET' else ('read', 300)
+        if not admit((tg_id,kind), limit):
+            raise HTTPException(429, 'Слишком много запросов. Повторите через минуту.', headers={'Retry-After':'60'})
     user = await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     if not user:
         await db.execute(
-            "INSERT INTO users (tg_id, username, first_name, is_admin, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (tg_id, username, first_name, is_admin, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(tg_id) DO NOTHING",
             (tg_id, payload.get("username"), payload.get("first_name"), int(tg_id in ADMIN_IDS), db.utcnow()),
         )
         user = await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (tg_id,))

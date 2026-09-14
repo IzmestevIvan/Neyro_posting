@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app import db
+from app.core import news_policy
 
 log = logging.getLogger("cards")
 
@@ -25,7 +26,8 @@ def moderation_keyboard(post_id: int) -> InlineKeyboardMarkup:
 
 def card_text(post: dict, channel: dict) -> str:
     source = html.escape(post.get("source_title") or "ручной пост")
-    header = f"<b>{source}</b>"
+    target = html.escape(channel.get("title") or channel.get("username") or str(channel["id"]))
+    header = f"<b>Канал: {target}</b> · на одобрение\n<b>{source}</b>"
     if post.get("url"):
         header += f' · <a href="{html.escape(post["url"], quote=True)}">оригинал</a>'
 
@@ -51,19 +53,8 @@ def card_text(post: dict, channel: dict) -> str:
 
 
 async def send_moderation_card(bot: Bot, channel: dict, post_id: int) -> None:
-    post = await db.fetch_one("SELECT * FROM posts WHERE id = ?", (post_id,))
-    if not post:
-        return
-    try:
-        message = await bot.send_message(
-            channel["owner_id"],
-            card_text(post, channel),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=moderation_keyboard(post_id),
-        )
-        await db.execute(
-            "UPDATE posts SET mod_message_id = ? WHERE id = ?", (message.message_id, post_id)
-        )
-    except Exception as exc:
-        log.warning("cannot send moderation card to %s: %s", channel["owner_id"], exc)
+    """Legacy entry point: background review notifications are disabled.
+
+    Keep this a no-op so any old caller cannot start a private news feed again.
+    Drafts are already persisted and displayed in the Mini App.
+    """

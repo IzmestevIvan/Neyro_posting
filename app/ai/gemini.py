@@ -2,12 +2,17 @@ import asyncio
 import json
 import logging
 import re
+import hashlib
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
 from app import db
+from app.ai import key_pool
+from app.core import runtime
+from app.core.runtime import ai_slots
 from app.config import (
     GEMINI_API_KEY,
     GEMINI_MODEL_FALLBACK,
@@ -74,7 +79,7 @@ def _is_transient(message: str) -> bool:
 async def _start_cooldown() -> None:
     until = datetime.now(timezone.utc) + timedelta(minutes=COOLDOWN_MINUTES)
     await db.set_kv(COOLDOWN_KEY, until.isoformat())
-    log.warning("main model on cooldown until %s", until)
+    log.info("main model on cooldown until %s", until)
 
 
 async def _call(
@@ -95,16 +100,22 @@ async def _call(
     if as_json:
         body["generationConfig"]["responseMimeType"] = "application/json"
 
-    resp = await client.post(
-        API.format(model=model),
-        headers={"x-goog-api-key": api_key},
-        json=body,
-        timeout=90,
-    )
+    async with ai_slots:
+        resp = await client.post(
+            API.format(model=model),
+            headers={"x-goog-api-key": api_key},
+            json=body,
+            timeout=60,
+        )
     if resp.status_code != 200:
-        raise AIError(f"{model}: HTTP {resp.status_code} {resp.text[:200]}")
+        raise AIError(f"{model}: HTTP {resp.status_code}")
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise AIError(f'{model}: некорректный ответ провайдера') from exc
+    if not isinstance(data, dict):
+        raise AIError(f'{model}: некорректная структура ответа')
     candidates = data.get("candidates") or []
     if not candidates:
         reason = (data.get("promptFeedback") or {}).get("blockReason", "empty response")
@@ -126,30 +137,68 @@ async def generate(
     as_json: bool = False,
     allow_fallback: bool = True,
 ) -> str:
-    key = (api_key or GEMINI_API_KEY or "").strip()
-    if not key:
-        raise NoKeyError("не задан ключ Gemini")
-
+    customer = (api_key or '').strip()
+    shared = GEMINI_API_KEY.strip()
+    routes = []
+    if customer:
+        routes.append({'secret': customer, 'id': None, 'label': 'client' if customer != shared else 'service'})
+    for row in await key_pool.candidates():
+        if row['secret'] != customer and row['secret'] != shared:
+            routes.append(dict(row, label=f"service pool #{row['id']}"))
+    if shared and shared != customer:
+        routes.append({'secret': shared, 'id': None, 'label': 'service'})
+    if not routes:
+        raise NoKeyError('Нет доступных ключей Gemini. Проверьте пул ключей в админ-панели.')
     primary = model or GEMINI_MODEL_MAIN
     chain = [primary]
-    if allow_fallback and GEMINI_MODEL_FALLBACK != primary:
-        chain.append(GEMINI_MODEL_FALLBACK)
-    if await cooldown_left() and len(chain) > 1:
-        chain.reverse()
-
+    if allow_fallback:
+        chain = list(dict.fromkeys([primary, GEMINI_MODEL_FALLBACK, GEMINI_MODEL_VERIFY, GEMINI_MODEL_MAIN]))
     errors = []
+    deadline = time.monotonic() + 180
     async with httpx.AsyncClient() as client:
-        for attempt, name in enumerate(chain):
-            try:
-                return await _call(client, name, key, prompt, system, temperature, as_json)
-            except (AIError, httpx.RequestError) as exc:
-                errors.append(str(exc))
-                log.warning("gemini call failed: %s", exc)
-                if name == primary and _is_transient(str(exc)):
-                    await _start_cooldown()
-                if attempt + 1 < len(chain):
-                    await asyncio.sleep(1.5)
-    raise AIError("; ".join(errors))
+        for route in routes:
+            current_key, key_id = route['secret'], route['id']
+            lock = runtime.channel_lock(('gemini-key', hashlib.sha256(current_key.encode()).hexdigest()))
+            # Busy keys are skipped so one slow account cannot hold up all channels.
+            if lock.locked():
+                continue
+            async with lock:
+                if key_id is not None and not await key_pool.claim(key_id):
+                    continue
+                models = list(chain)
+                if current_key == shared and await cooldown_left() and len(models) > 1:
+                    models = [m for m in models if m != GEMINI_MODEL_MAIN] + [GEMINI_MODEL_MAIN]
+                operational_failure = False
+                route_errors = []
+                for attempt, name in enumerate(models):
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise AIError('Превышено время ожидания ИИ; материал остаётся в очереди')
+                    try:
+                        async with asyncio.timeout(min(60, left)):
+                            result = await _call(client, name, current_key, prompt, system, temperature, as_json)
+                        if key_id is not None:
+                            await key_pool.succeeded(key_id)
+                        if errors:
+                            log.warning('Обработка продолжена: резервный маршрут ИИ успешно ответил. Модель: %s; маршрут: %s', name, route['label'])
+                        return result
+                    except (AIError, httpx.RequestError, TimeoutError) as exc:
+                        detail = str(exc) or type(exc).__name__
+                        errors.append(detail)
+                        route_errors.append(detail)
+                        log.warning('gemini call failed (%s): %s', route['label'], detail)
+                        operational_failure = operational_failure or isinstance(exc, (httpx.RequestError, TimeoutError)) or bool(re.search(r'HTTP (?:400|401|403|404|429|5\d\d)\b', detail))
+                        if current_key == shared and name == GEMINI_MODEL_MAIN and _is_transient(detail):
+                            await _start_cooldown()
+                        if re.search(r'HTTP (?:400|401|403)\b', detail) or (route['label'] == 'client' and 'HTTP 429' in detail):
+                            break
+                        if attempt + 1 < len(models):
+                            await asyncio.sleep(1.5)
+                if not operational_failure:
+                    break  # Content/safety refusal is not a reason to switch accounts.
+                if key_id is not None:
+                    await key_pool.failed(key_id, '; '.join(route_errors))
+    raise AIError('; '.join(errors) or 'Все доступные ключи заняты. Материал ожидает повторной обработки.')
 
 
 async def generate_json(prompt: str, **kwargs) -> dict:
@@ -159,7 +208,7 @@ async def generate_json(prompt: str, **kwargs) -> dict:
     try:
         parsed = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise AIError(f"модель вернула не JSON: {payload[:200]}") from exc
+        raise AIError("модель вернула не JSON") from exc
     return parsed if isinstance(parsed, dict) else {"result": parsed}
 
 

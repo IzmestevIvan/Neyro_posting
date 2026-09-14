@@ -111,7 +111,9 @@ class TestSettingsWhitelist:
             _clean_settings({"digest_time": "вечером"})
 
     def test_free_text_is_length_capped(self):
-        assert len(_clean_settings({"instructions": "я" * 9000})["instructions"]) == 4000
+        with pytest.raises(HTTPException) as error:
+            _clean_settings({"instructions": "я" * 9000})
+        assert error.value.status_code == 422
 
 
 @pytest.mark.parametrize("value", ["24:00", "99:99", "12:60", "1:30", None])

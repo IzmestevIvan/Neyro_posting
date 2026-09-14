@@ -4,6 +4,8 @@ __pycache__/
 **/__pycache__/
 *.pyc
 .env
+.deploy.env
+.pytest_cache/
 .git/
 .gitignore
 README.md

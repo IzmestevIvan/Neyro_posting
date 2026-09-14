@@ -1,7 +1,14 @@
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *bounded-logs
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-neyro}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нужно задать POSTGRES_PASSWORD в .env}
@@ -18,8 +25,12 @@ services:
     build: .
     image: neyro-posting:latest
     restart: unless-stopped
+    logging: *bounded-logs
+    init: true
+    stop_grace_period: 30s
     env_file: .env
     environment:
+      APP_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-neyro}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-neyro}
     volumes:
       - ./data:/app/data
@@ -32,6 +43,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *bounded-logs
     ports:
       - "80:80"
       - "443:443"
