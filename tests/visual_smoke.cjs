@@ -57,6 +57,13 @@ const assert = require('node:assert/strict');
         if(overflow) failures.push(`${width}px ${view}: horizontal overflow`);
         const visibleSupport = await page.locator('#supportLink').isVisible();
         if(visibleSupport !== (view==='settings')) failures.push(`${width}px ${view}: misplaced support link`);
+        if(view==='settings') {
+          const reachable = await page.locator('#supportLink').evaluate(el => {
+            const rect = el.getBoundingClientRect();
+            return rect.top >= 0 && rect.bottom <= innerHeight - 92;
+          });
+          if(!reachable) failures.push(`${width}px settings: support requires scrolling`);
+        }
       }
       await page.close();
     }
