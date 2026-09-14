@@ -145,10 +145,10 @@ h3.section { font-size: 12px; text-transform: uppercase; letter-spacing: .7px; c
 
 /* ---------- rows & groups ---------- */
 .group { padding: 0; margin-bottom: 10px; }
-.group summary { padding: 16px 15px; font-size: 16px; font-weight: 600; cursor: pointer;
+.group > summary { padding: 16px 15px; font-size: 16px; font-weight: 600; cursor: pointer;
                  list-style: none; display: flex; justify-content: space-between; align-items: center; }
-.group summary::-webkit-details-marker { display: none; }
-.group .body { padding: 0 15px 16px; display: flex; flex-direction: column; gap: 13px; }
+.group > summary::-webkit-details-marker { display: none; }
+.group > .body { padding: 0 15px 16px; display: flex; flex-direction: column; gap: 13px; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .row > span:first-child { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -448,3 +448,55 @@ body.tour-open { overflow:hidden; }
 #sourceBatchPanel { padding-top:16px; margin-bottom:16px; }
 #sourceBatchInput { display:block; width:100%; margin-top:10px; resize:vertical; }
 #sourceBatchStatus { overflow-wrap:anywhere; margin-top:12px; font-size:13px; }
+
+/* Shared layout fixes for settings, diagnostics and administrative controls. */
+:root { color-scheme: dark; }
+body { padding-bottom:calc(92px + env(safe-area-inset-bottom)); }
+button, select, input, textarea { min-width:0; }
+button { white-space:normal; line-height:1.35; }
+button:disabled { transform:none; }
+.src .info, .src .info i, .adminrow > span, .system p > span { overflow-wrap:anywhere; min-width:0; }
+.src button { min-width:44px; min-height:44px; flex:none; }
+.adminrow > span:first-child { flex:1; }
+.admin-limit { flex:none; display:grid; gap:5px; font-size:10px; color:var(--muted); text-align:center; }
+.admin-limit input[type=number] { min-height:44px; width:88px; }
+.form-actions { display:flex; flex-wrap:wrap; gap:10px; }
+.form-actions > button { flex:1 1 140px; min-height:46px; width:auto; }
+.admin-key-form { display:flex; flex-direction:column; gap:14px; }
+.admin-key-form > .hint, .admin-key-form > .label { margin:0; }
+#apiKeyInput { font-family:ui-monospace, monospace; line-height:1.5; }
+#apiKeyList { display:grid; gap:12px; }
+.key-card { margin:0; background:var(--surface-2); }
+.key-card .hint { margin:8px 0 16px; }
+.support-link { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  width:100%; min-height:48px; margin:16px 0; text-decoration:none; border-radius:var(--r-sm); color:var(--text); }
+.upload-control { position:relative; display:flex; flex-direction:column; align-items:center;
+  gap:4px; padding:16px; border:1px dashed var(--accent); border-radius:var(--r-sm);
+  background:var(--surface-2); color:var(--text); cursor:pointer; text-align:center; }
+.upload-control small { color:var(--muted); }
+.upload-control input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.upload-control:focus-within { outline:2px solid var(--accent); outline-offset:3px; }
+.upload-control:has(input:disabled) { opacity:.5; cursor:wait; }
+.next-step > div { flex:1; min-width:0; }
+.next-step { margin-bottom:12px; }
+.queue-details { margin-bottom:20px; padding:14px 16px; }
+.queue-details summary { cursor:pointer; color:var(--muted); font-size:13px; }
+.queue-details .hint { line-height:1.65; margin:12px 0 0; }
+.chart > .empty-note { border:0; background:none; padding:0; }
+.system div.meter { display:grid; grid-template-columns:40px minmax(30px,1fr) auto; }
+.system .track { width:100%; }
+#adminEvents .card { margin:0; padding:14px; background:var(--surface-2); }
+#adminEvents p { margin:8px 0; font-size:13px; }
+#adminEvents details summary { padding:6px 0; font-size:12px; color:var(--muted); cursor:pointer; }
+#adminTotals { grid-template-columns:repeat(3,minmax(0,1fr)); }
+#adminTotals .stat { padding:16px 10px; }
+#adminTotals .stat b { font-size:clamp(22px,5vw,30px); }
+@media(max-width:600px) {
+  select, input[type=text], input[type=password], input[type=number], textarea { font-size:16px; }
+  .next-step .ghost { flex-shrink:1; }
+  .feed-tabs button { flex:1; padding:11px 8px; }
+  .pair { gap:8px; min-width:0; }
+  .window { gap:5px; }
+  #apiKeyList .form-actions > button { flex-basis:100px; }
+  .group > summary { gap:10px; }
+}

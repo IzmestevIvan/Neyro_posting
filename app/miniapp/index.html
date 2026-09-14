@@ -163,6 +163,10 @@
   <section id="page-home" class="page">
     <div class="workspace-intro"><span class="eyebrow">ВАША РЕДАКЦИЯ</span><h2>Всё готово к следующему посту?</h2><p class="muted">Источники, проверка и публикация — под вашим контролем.</p></div>
     <div id="nextStep" class="next-step" aria-live="polite"></div>
+    <details id="queueDetails" class="card queue-details" hidden>
+      <summary>Состояние очереди</summary>
+      <p id="queueReason" class="hint"></p>
+    </details>
     <div id="statsGrid" class="grid"></div>
     <button id="publishNow" class="accent wide tall">
       <svg class="ic"><use href="#i-bolt"/></svg> Опубликовать сейчас
@@ -320,15 +324,17 @@
           <input type="checkbox" data-field="watermark">
         </label>
         <label class="label" for="watermarkPosition">Положение логотипа</label>
-        <select id="watermarkPosition" data-field="watermark_position">
+        <div class="select-wrap"><select id="watermarkPosition" data-field="watermark_position">
           <option value="top-left">Слева сверху</option>
           <option value="top-right">Справа сверху</option>
           <option value="center">По центру</option>
           <option value="bottom-left">Слева снизу</option>
           <option value="bottom-right">Справа снизу</option>
-        </select>
-        <label class="label" for="logoUpload">Загрузить логотип PNG (до 4 МБ)</label>
-        <input id="logoUpload" type="file" accept="image/png,.png">
+        </select></div>
+        <label class="upload-control" for="logoUpload">
+          <input id="logoUpload" type="file" accept="image/png,.png">
+          <span>Выбрать логотип PNG</span><small>До 4 МБ · прозрачный фон</small>
+        </label>
         <p id="logoStatus" class="hint" aria-live="polite"></p>
         <p class="hint">Прозрачный фон сохраняется. Логотип пропорционально уменьшается и размещается с отступом от края. Белый фон исходного файла автоматически не удаляется.</p>
       </div>
@@ -349,6 +355,7 @@
       <svg class="ic tour-entry-arrow" aria-hidden="true"><use href="#i-back"/></svg>
     </button>
 
+    <a id="supportLink" class="ghost support-link" hidden target="_blank" rel="noopener noreferrer">Написать в поддержку <span aria-hidden="true">↗</span></a>
     <div class="card group plan" id="planCard"></div>
 
     <button id="deleteChannel" class="danger wide">
@@ -356,7 +363,6 @@
     </button>
   </section>
 
-  <a id="supportLink" class="ghost wide" hidden target="_blank" rel="noopener noreferrer">Написать в поддержку</a>
   <!-- админ -->
   <section id="page-admin" class="page" hidden>
     <div class="pagehead">
@@ -372,15 +378,18 @@
     <div id="adminMonitoring" class="grid"></div>
     <p class="hint">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</p>
 
-    <details class="card group"><summary>Журнал событий и предупреждений</summary>
+    <details class="card group"><summary>Журнал событий <svg class="ic chev" aria-hidden="true"><use href="#i-back"/></svg></summary>
       <div id="adminEvents" class="body"></div>
     </details>
     <h3 class="section">Ключи Gemini</h3>
-    <div class="card">
+    <div class="card admin-key-form">
       <p class="hint">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</p>
+      <label for="apiKeyInput" class="label">Новые ключи</label>
       <textarea id="apiKeyInput" rows="3" autocomplete="off" spellcheck="false" placeholder="Вставьте ключи Gemini"></textarea>
+      <div class="form-actions">
       <button id="apiKeyAdd" class="accent wide">Сохранить ключи</button>
       <button id="apiKeyRefresh" class="ghost wide">Обновить статусы</button>
+      </div>
       <p id="apiKeyStatus" class="hint" aria-live="polite"></p>
       <div id="apiKeyList"></div>
     </div>

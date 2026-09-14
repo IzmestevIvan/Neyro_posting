@@ -52,9 +52,11 @@ async def owner(store):
 
 @pytest_asyncio.fixture
 async def channel(store, owner):
+    # General pipeline tests must not depend on the wall clock. Window-policy
+    # tests supply their own hours explicitly.
     channel_id = await store.insert(
-        "INSERT INTO channels (owner_id, chat_id, username, title, created_at) "
-        "VALUES (?, -100, 'chan', 'Канал', ?)",
+        "INSERT INTO channels (owner_id, chat_id, username, title, window_start, window_end, created_at) "
+        "VALUES (?, -100, 'chan', 'Канал', 0, 24, ?)",
         (owner, store.utcnow()),
     )
     return await store.fetch_one("SELECT * FROM channels WHERE id = ?", (channel_id,))

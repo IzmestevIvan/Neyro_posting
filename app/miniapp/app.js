@@ -115,11 +115,8 @@ function renderStats(stats) {
   if (waiting.processing) details.push(`Ожидают обработки: ${waiting.processing}.`);
   if (!stats.queued && stats.sources) details.push('Очередь пуста — ожидаем подходящие новости. Темп не гарантирует количество постов.');
   if (stats.last_rejection) details.push(`Последний отсев (${ago(stats.last_rejection.created_at)}): ${stats.last_rejection.reason}.`);
-  if (details.length) {
-    const note = document.createElement('p');
-    note.className = 'hint'; note.textContent = details.join(' ');
-    $('#nextStep').appendChild(note);
-  }
+  $('#queueDetails').hidden = !details.length;
+  $('#queueReason').textContent = details.join(' ');
 
   drawChart('#postsChart', stats.posts_chart, false);
   drawChart('#subsChart', stats.subscribers_chart, true);
@@ -647,7 +644,7 @@ async function loadAdmin() {
     <div class="adminrow">
       <span>${esc(u.first_name || u.tg_id)}${u.username ? ` @${esc(u.username)}` : ''}
         <div class="sub">id ${u.tg_id} · каналов ${u.channels}${u.promo_code ? ' · ' + esc(u.promo_code) : ''}</div></span>
-      <input type="number" value="${u.daily_limit}" data-user="${u.tg_id}" title="лимит постов в день">
+      <label class="admin-limit"><span>Постов/день</span><input type="number" min="0" max="100000" value="${u.daily_limit}" data-user="${u.tg_id}" title="лимит постов в день"></label>
     </div>`).join('') || '<p class="empty-note">Пользователей пока нет.</p>';
 
   $('#adminChannels').innerHTML = data.channels.map((c) => `
@@ -679,7 +676,7 @@ async function loadApiKeys() {
   $('#apiKeyList').innerHTML = data.keys.map(k => {
     const cooling = k.cooldown_until && new Date(k.cooldown_until) > new Date();
     const state = !k.enabled ? 'Отключён' : cooling ? `Пауза до ${new Date(k.cooldown_until).toLocaleTimeString('ru-RU')}` : k.last_success_at ? 'Доступен для запросов' : 'Ожидает первого успешного запроса';
-    return `<div class="card"><b>${esc(k.label)}</b><p class="hint">${esc(state)}${k.last_error ? ' · ' + esc(k.last_error) : ''}</p><button class="ghost" data-key-toggle="${k.id}" data-enabled="${k.enabled}">${k.enabled ? 'Отключить' : 'Включить'}</button> <button class="danger" data-key-delete="${k.id}">Удалить</button></div>`;
+    return `<div class="card key-card"><b>${esc(k.label)}</b><p class="hint">${esc(state)}${k.last_error ? ' · ' + esc(k.last_error) : ''}</p><div class="form-actions"><button class="ghost" data-key-toggle="${k.id}" data-enabled="${k.enabled}">${k.enabled ? 'Отключить' : 'Включить'}</button><button class="danger" data-key-delete="${k.id}">Удалить</button></div></div>`;
   }).join('');
   $('#apiKeyList').querySelectorAll('button').forEach(button => button.addEventListener('click', async () => {
     const remove = button.dataset.keyDelete;

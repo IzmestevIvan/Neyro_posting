@@ -33,6 +33,7 @@ async def test_disabled_filter_rechecks_only_recent_matching_rejections(store, c
 
 @pytest.mark.asyncio
 async def test_night_poll_advances_cursor_without_stockpiling(store, channel, monkeypatch):
+    channel = dict(channel, window_start=8, window_end=23)
     clock = datetime(2026,9,10,0,0,tzinfo=timezone.utc)
     monkeypatch.setattr(scheduler, 'now_utc', lambda: clock)
     source_id = await store.insert("INSERT INTO sources(channel_id,kind,ref,created_at) VALUES(?,'tg','news',now())", (channel['id'],))
