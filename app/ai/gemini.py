@@ -90,6 +90,7 @@ async def _call(
     system: Optional[str],
     temperature: float,
     as_json: bool,
+    search: bool = False,
 ) -> str:
     body: dict = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -97,7 +98,9 @@ async def _call(
     }
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
-    if as_json:
+    if search:
+        body['tools'] = [{'google_search': {}}]
+    if as_json and not search:
         body["generationConfig"]["responseMimeType"] = "application/json"
 
     async with ai_slots:
@@ -124,6 +127,13 @@ async def _call(
     text = "".join(p.get("text", "") for p in parts).strip()
     if not text:
         raise AIError(f"{model}: {candidates[0].get('finishReason', 'no text')}")
+    if search:
+        metadata = candidates[0].get('groundingMetadata') or {}
+        sources = [chunk['web'] for chunk in metadata.get('groundingChunks', []) if isinstance(chunk, dict) and isinstance(chunk.get('web'), dict)]
+        if not sources or not metadata.get('groundingSupports'):
+            raise AIError('Поиск не предоставил подтверждающих ссылок')
+        return json.dumps({'text': text[:10000], 'sources': sources[:12],
+                           'search_entry': (metadata.get('searchEntryPoint') or {}).get('renderedContent','')[:30000]}, ensure_ascii=False)
     return text
 
 
@@ -136,6 +146,7 @@ async def generate(
     temperature: float = 0.8,
     as_json: bool = False,
     allow_fallback: bool = True,
+    search: bool = False,
 ) -> str:
     customer = (api_key or '').strip()
     shared = GEMINI_API_KEY.strip()
@@ -176,7 +187,10 @@ async def generate(
                         raise AIError('Превышено время ожидания ИИ; материал остаётся в очереди')
                     try:
                         async with asyncio.timeout(min(60, left)):
-                            result = await _call(client, name, current_key, prompt, system, temperature, as_json)
+                            if search:
+                                result = await _call(client, name, current_key, prompt, system, temperature, as_json, search=True)
+                            else:
+                                result = await _call(client, name, current_key, prompt, system, temperature, as_json)
                         if key_id is not None:
                             await key_pool.succeeded(key_id)
                         if errors:
@@ -190,13 +204,13 @@ async def generate(
                         operational_failure = operational_failure or isinstance(exc, (httpx.RequestError, TimeoutError)) or bool(re.search(r'HTTP (?:400|401|403|404|429|5\d\d)\b', detail))
                         if current_key == shared and name == GEMINI_MODEL_MAIN and _is_transient(detail):
                             await _start_cooldown()
-                        if re.search(r'HTTP (?:400|401|403)\b', detail) or (route['label'] == 'client' and 'HTTP 429' in detail):
+                        if re.search(r'HTTP (?:401|403)\b', detail) or ('HTTP 400' in detail and not search) or (route['label'] == 'client' and 'HTTP 429' in detail):
                             break
                         if attempt + 1 < len(models):
                             await asyncio.sleep(1.5)
                 if not operational_failure:
                     break  # Content/safety refusal is not a reason to switch accounts.
-                if key_id is not None:
+                if key_id is not None and not (search and all('HTTP 400' in e for e in route_errors)):
                     await key_pool.failed(key_id, '; '.join(route_errors))
     raise AIError('; '.join(errors) or 'Все доступные ключи заняты. Материал ожидает повторной обработки.')
 

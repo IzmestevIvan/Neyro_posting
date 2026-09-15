@@ -316,7 +316,8 @@ async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool 
             if current.get('business_mode') and fresh['is_manual']:
                 from app.core.business import draft_text
                 try:
-                    text, reason, url = await draft_text(current, fresh['raw_text'] or '')
+                    research = {}
+                    text, reason, url = await draft_text(current, fresh['raw_text'] or '', research_out=research)
                 except ValueError as exc:
                     await db.execute("UPDATE posts SET status='pending',text_out=NULL,business_draft=1,reason=? WHERE id=? AND status='new'",
                                      (str(exc)[:1500], fresh['id']))
@@ -324,8 +325,8 @@ async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool 
                 latest = await db.fetch_one('SELECT business_profile,business_mode FROM channels WHERE id=?', (channel['id'],))
                 if not latest or latest['business_profile'] != current['business_profile'] or not latest['business_mode']:
                     return await defer_processing(fresh, 'Досье или режим изменились — подготовка будет повторена')
-                await db.execute("UPDATE posts SET status='pending',text_out=?,reason=?,business_draft=1,publish_at=NULL "
-                                 "WHERE id=? AND status='new'", (text, reason, fresh['id']))
+                await db.execute("UPDATE posts SET status='pending',text_out=?,reason=?,fact_check=?,business_draft=1,publish_at=NULL "
+                                 "WHERE id=? AND status='new'", (text, reason, json.dumps({'research':research},ensure_ascii=False), fresh['id']))
                 return
             with channel_scope(channel):
                 await _process_post(bot, fresh, channel, force_once=force_once)

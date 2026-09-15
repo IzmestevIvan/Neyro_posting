@@ -12,6 +12,10 @@ from tests.test_pipeline_db import FakeBot, make_post
 
 TEXT = 'Перед оснащением переговорной определите число участников, сценарии встреч и требования к звуку. Это поможет составить понятное техническое задание.'
 
+@pytest.fixture(autouse=True)
+def offline_research(monkeypatch):
+    monkeypatch.setattr(business, 'research_company', AsyncMock(return_value={}))
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('explicit', [False, True])
@@ -19,7 +23,7 @@ async def test_unreadable_website_only_blocks_explicit_reference(store,channel,m
     current = await enable(store,channel)
     current['business_profile'] = business.clean_profile({'name':'DOBRA','services':'Связь','website':'https://example.org'})
     monkeypatch.setattr(business.web,'fetch_article',AsyncMock(side_effect=ValueError('не удалось извлечь текст')))
-    ai = AsyncMock(return_value={'text':TEXT,'review':'Проверьте факты'})
+    ai = AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':'Проверьте факты'})
     monkeypatch.setattr(gemini,'generate_json',ai)
     if explicit:
         with pytest.raises(ValueError,match='очистите ссылку'):
@@ -35,7 +39,7 @@ async def test_unreadable_website_only_blocks_explicit_reference(store,channel,m
 @pytest.mark.asyncio
 async def test_statistics_failure_does_not_hide_saved_draft(store,channel,monkeypatch):
     await enable(store,channel)
-    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'text':TEXT,'review':''}))
+    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':''}))
     monkeypatch.setattr(store,'bump_stat',AsyncMock(side_effect=RuntimeError('stats unavailable')))
     result = await business.generate(channel['id'])
     assert result['status']=='pending'
@@ -58,7 +62,7 @@ def test_profile_validation(profile):
 @pytest.mark.asyncio
 async def test_generates_pending_without_sources(store, channel, monkeypatch):
     await enable(store, channel)
-    ai = AsyncMock(return_value={'text':TEXT,'review':'Проверьте терминологию'})
+    ai = AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':'Проверьте терминологию'})
     monkeypatch.setattr(gemini, 'generate_json', ai)
     result = await business.generate(channel['id'])
     post = await store.fetch_one('SELECT * FROM posts WHERE id=?',(result['post_id'],))
@@ -86,7 +90,7 @@ async def test_dossier_changed_while_generating_discards_result(store, channel, 
     await enable(store, channel)
     async def ai(*args, **kwargs):
         await store.execute("UPDATE channels SET business_profile='{}' WHERE id=?",(channel['id'],))
-        return {'text':TEXT,'review':''}
+        return {'scope':'company','basis':'Услуги из досье','text':TEXT,'review':''}
     monkeypatch.setattr(gemini,'generate_json',ai)
     with pytest.raises(ValueError, match='изменились'):
         await business.generate(channel['id'])
@@ -156,7 +160,7 @@ async def test_imported_news_do_not_consume_company_generation_limit(store,chann
     user = await store.fetch_one('SELECT * FROM users WHERE tg_id=1')
     await update_channel(channel['id'],{'business_mode':True},user)
     await enable(store,channel,automatic)
-    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'text':TEXT,'review':''}))
+    monkeypatch.setattr(gemini,'generate_json',AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':''}))
     if automatic:
         await business.propose_due()
     else:
@@ -224,7 +228,7 @@ async def test_malformed_generation_never_becomes_draft(store,channel,monkeypatc
 @pytest.mark.asyncio
 async def test_auto_uses_daily_interval_and_pause(store,channel,monkeypatch):
     await enable(store,channel,True)
-    ai = AsyncMock(return_value={'text':TEXT,'review':''})
+    ai = AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':''})
     monkeypatch.setattr(gemini,'generate_json',ai)
     await store.execute('UPDATE channels SET paused=1 WHERE id=?',(channel['id'],))
     await business.propose_due()
@@ -241,7 +245,7 @@ async def test_web_reference_is_data_not_claimed_factcheck(store,channel,monkeyp
     current = await enable(store,channel)
     article = AsyncMock(return_value=SimpleNamespace(text='Материал официальной страницы'))
     monkeypatch.setattr(business.web,'fetch_article',article)
-    ai = AsyncMock(return_value={'text':TEXT,'review':'Проверьте факты страницы'})
+    ai = AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':'Проверьте факты страницы'})
     monkeypatch.setattr(gemini,'generate_json',ai)
     text, review, url = await business.draft_text(current,article_url='https://example.org/article')
     assert json.loads(ai.call_args.args[0])['unverified_web_reference']=='Материал официальной страницы'

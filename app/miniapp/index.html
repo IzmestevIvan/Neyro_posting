@@ -243,6 +243,8 @@
         <p class="hint">Заполните досье и сохраните его. Сведения используются ИИ для подготовки черновиков. Не добавляйте пароли и конфиденциальные данные.</p>
         <label class="label">Название компании<input data-business="name" maxlength="3000" placeholder="Например, DOBRA Group"></label>
         <label class="label">Сайт компании<input data-business="website" maxlength="500" placeholder="https://example.ru" type="url"></label>
+        <label class="label">Публичные соцсети компании<textarea data-business="socials" maxlength="3000" rows="2" placeholder="Ваши Telegram, VK и другие публичные страницы"></textarea></label>
+        <label class="label">О чём писать<div class="select-wrap"><select data-business="content_policy"><option value="company_only">Только о компании</option><option value="company_then_topic">О компании; тематика — в крайнем случае</option></select></div></label>
         <label class="label">Услуги и направления<textarea data-business="services" maxlength="3000" rows="3" placeholder="Чем занимается компания; приоритетные темы"></textarea></label>
         <label class="label">Для кого пишем<textarea data-business="audience" maxlength="3000" rows="2" placeholder="Кто ваши клиенты и что им важно"></textarea></label>
         <label class="label">География<input data-business="geography" maxlength="3000" placeholder="Города и регионы"></label>
@@ -253,7 +255,7 @@
         <label class="row"><span><b>Предлагать пост каждый день</b><i>Не больше 5 черновиков в ожидании. Публикация — только вручную.</i></span><input type="checkbox" data-field="business_auto"></label>
         <label class="label">Новость компании или тема<textarea id="businessBrief" maxlength="4000" rows="3" placeholder="Расскажите, что произошло, или оставьте пустым — редактор предложит полезный материал"></textarea></label>
         <label class="label">Страница с материалом<input id="businessUrl" maxlength="1000" type="url" placeholder="https://… (необязательно)"></label>
-        <p class="hint">Ссылка необязательна: можно подготовить пост по вашему тексту и досье. Если сайт компании не читается, используем ваши данные и предупредим в черновике. Поиск по всему интернету пока не подключён.</p>
+        <p class="hint">Источники Telegram/RSS не нужны. Редактор ищет компанию на сайте и в публичных соцсетях; ссылки покажет рядом с черновиком. Для точного поиска укажите сайт или соцсеть в досье. При недоступности поиска используются ваши данные с предупреждением.</p>
         <button id="generateBusiness" class="accent wide">Подготовить на согласование</button>
         <p id="businessStatus" class="hint" role="status">Готовые черновики появятся во вкладке «Посты».</p>
       </div>

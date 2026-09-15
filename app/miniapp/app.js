@@ -35,6 +35,13 @@ function esc(text) {
   return String(text ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+function researchCard(research) {
+  if (!research?.sources?.length) return '';
+  const links = research.sources.map(s => `<p><a href="${esc(safeLink(s.uri))}" target="_blank" rel="noopener noreferrer">${esc(s.title || 'Найденная страница')}</a></p>`).join('');
+  const entry = research.search_entry ? `<iframe title="Поисковые подсказки Google" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(research.search_entry)}"></iframe>` : '';
+  return `<details class="business-research"><summary>Что найдено о компании · проверьте совпадение</summary>${links}${entry}</details>`;
+}
+
 function toast(message, isError = false) {
   const el = document.createElement('div');
   el.className = `toast${isError ? ' err' : ''}`;
@@ -210,6 +217,7 @@ async function loadFeed() {
           <button data-act="${post.business_draft ? 'edit' : 'regen'}">${icon('refresh')} ${post.business_draft ? 'Править' : 'Переписать'}</button>
           <button class="no" data-act="reject" aria-label="Отклонить пост">${icon('close')}</button>
         </div>
+        ${researchCard(post.fact_check?.research)}
       </article>`;
     })
     .join('');
@@ -470,7 +478,7 @@ function fillSettings() {
   if (!channel) return;
   let profile = {};
   try { profile = JSON.parse(channel.business_profile || '{}'); } catch {}
-  $$('[data-business]').forEach(el => { el.value = drafts.get(`${channel.id}:business:${el.dataset.business}`) ?? profile[el.dataset.business] ?? ''; });
+  $$('[data-business]').forEach(el => { el.value = drafts.get(`${channel.id}:business:${el.dataset.business}`) ?? profile[el.dataset.business] ?? (el.dataset.business === 'content_policy' ? 'company_only' : ''); });
   $('#businessBrief').value = drafts.get(`${channel.id}:businessBrief`) || '';
   $('#businessUrl').value = drafts.get(`${channel.id}:businessUrl`) || '';
   $('#generateBusiness').disabled = !channel.business_mode || publishingNow;
@@ -512,7 +520,7 @@ $('#generateBusiness').addEventListener('click', async () => {
   const input = {brief: $('#businessBrief').value, url: $('#businessUrl').value};
   let saved = {};
   try { saved = JSON.parse(channel.business_profile || '{}'); } catch {}
-  if ($$('[data-business]').some(el => el.value.trim() !== (saved[el.dataset.business] || ''))) {
+  if ($$('[data-business]').some(el => el.value.trim() !== (saved[el.dataset.business] || (el.dataset.business === 'content_policy' ? 'company_only' : '')))) {
     toast('Сначала сохраните изменения досье', true); return;
   }
   publishingNow = true;

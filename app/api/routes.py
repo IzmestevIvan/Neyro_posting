@@ -460,7 +460,9 @@ async def post_action(
             raise HTTPException(422, 'Текст поста: от 40 до 3000 символов')
         if post['status'] != 'pending':
             raise HTTPException(409, 'Пост уже не ожидает согласования')
-        if not await publisher.replace_draft(post, text.strip(), None):
+        previous_check = json.loads(post['fact_check']) if post.get('fact_check') else {}
+        evidence = {'research':previous_check['research']} if previous_check.get('research') else None
+        if not await publisher.replace_draft(post, text.strip(), evidence):
             raise HTTPException(409, 'Пост изменился — обновите ленту')
         return {'ok': True}
 
