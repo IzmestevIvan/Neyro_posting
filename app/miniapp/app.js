@@ -115,6 +115,8 @@ function renderStats(stats) {
   $('#status').textContent = `${stats.paused ? 'на паузе' : 'работает'} · ${stats.mode} · ${time}`;
   const waiting = stats.waiting || {};
   const details = [];
+  $('#channelBlockers').hidden = !stats.blockers?.length;
+  $('#channelBlockers').textContent = (stats.blockers || []).join(' ');
   if (waiting.last_published_at) details.push(`Последняя публикация: ${ago(waiting.last_published_at)}.`);
   if (waiting.next_at) details.push(`Ближайший срок в очереди: ${new Date(waiting.next_at).toLocaleString('ru-RU')}.`);
   if (waiting.digest) details.push(`В дайджесте: ${waiting.digest}, время выпуска — ${channel.digest_time} (${channel.tz}).`);

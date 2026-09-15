@@ -203,6 +203,9 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Serialize concurrent readers of this source; commit cursor and rows together.
+            current_channel = await conn.fetchrow('SELECT business_mode,paused FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
+            if not current_channel or current_channel['business_mode'] or current_channel['paused']:
+                return 0
             locked = await conn.fetchrow("SELECT last_uid FROM sources WHERE id=$1 FOR UPDATE", source["id"])
             if not locked or locked["last_uid"] != source["last_uid"]:
                 return 0  # A newer poll has committed; never rewind its cursor.
@@ -236,20 +239,25 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
                     "title=COALESCE(title,$3), median_views=$4 WHERE id=$5",
                     items[-1].uid, db.utcnow(), title, median or source["median_views"], source["id"],
                 )
+            else:
+                await conn.execute('UPDATE sources SET checked_at=$1,error=NULL WHERE id=$2', db.utcnow(), source['id'])
 
     return created
 
 
 async def poll_channel(client: httpx.AsyncClient, channel: dict, bot: Bot = None) -> None:
+    if channel.get('business_mode') or channel.get('paused'):
+        return
     if not await access.owner_has_access(channel["owner_id"]):
         return
     sources = await db.fetch_all(
         "SELECT * FROM sources WHERE channel_id = ? AND enabled = 1", (channel["id"],)
     )
-    for source in sources:
+    async def poll_one(source):
         state["polling"] = source["ref"]
         try:
-            await poll_source(client, channel, source)
+            async with asyncio.timeout(45):
+                await poll_source(client, channel, source)
         except Exception as exc:
             log.warning("source %s failed: %s", source["ref"], type(exc).__name__, exc_info=True)
             await db.execute(
@@ -258,6 +266,7 @@ async def poll_channel(client: httpx.AsyncClient, channel: dict, bot: Bot = None
             )
             if bot and source.get('error'):
                 await alert_admins(bot, "sources", "Повторяются ошибки источников. Недоступные источники отмечены в панели.")
+    await runtime.bounded_map(sources, poll_one, 2)
     state["polling"] = None
 
 
@@ -299,6 +308,25 @@ async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool 
     async with lock:
         fresh = await db.fetch_one("SELECT * FROM posts WHERE id=? AND status='new'", (post['id'],))
         if fresh:
+            current = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
+            if not current:
+                return
+            if current.get('business_mode') and not fresh['is_manual']:
+                return
+            if current.get('business_mode') and fresh['is_manual']:
+                from app.core.business import draft_text
+                try:
+                    text, reason, url = await draft_text(current, fresh['raw_text'] or '')
+                except ValueError as exc:
+                    await db.execute("UPDATE posts SET status='pending',text_out=NULL,business_draft=1,reason=? WHERE id=? AND status='new'",
+                                     (str(exc)[:1500], fresh['id']))
+                    return
+                latest = await db.fetch_one('SELECT business_profile,business_mode FROM channels WHERE id=?', (channel['id'],))
+                if not latest or latest['business_profile'] != current['business_profile'] or not latest['business_mode']:
+                    return await defer_processing(fresh, 'Досье или режим изменились — подготовка будет повторена')
+                await db.execute("UPDATE posts SET status='pending',text_out=?,reason=?,business_draft=1,publish_at=NULL "
+                                 "WHERE id=? AND status='new'", (text, reason, fresh['id']))
+                return
             with channel_scope(channel):
                 await _process_post(bot, fresh, channel, force_once=force_once)
 
@@ -608,7 +636,7 @@ async def weekly_report(bot: Bot) -> None:
 async def poll_loop(bot: Bot) -> None:
     while True:
         try:
-            channels = await db.fetch_all("SELECT * FROM channels")
+            channels = await db.fetch_all("SELECT * FROM channels WHERE paused=0 AND business_mode=0 ORDER BY id")
             state["activity"] = "проверяю источники" if channels else "нет активных каналов"
             async with httpx.AsyncClient() as client:
                 async def poll(channel):
@@ -635,7 +663,9 @@ async def process_round(bot: Bot, after_channel: int = 0) -> int:
             eligible.append(channel['id'])
     rows = await db.fetch_all(
         "SELECT * FROM (SELECT DISTINCT ON (channel_id) * FROM posts WHERE status='new' "
-        "AND channel_id=ANY(?::bigint[]) AND (publish_at IS NULL OR publish_at<=now()) "
+        "AND channel_id=ANY(?::bigint[]) AND (is_manual=1 OR NOT EXISTS "
+        "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)) "
+        "AND (publish_at IS NULL OR publish_at<=now()) "
         "ORDER BY channel_id,created_at DESC,id DESC) candidates "
         "ORDER BY (channel_id<=?),channel_id LIMIT 12", (eligible, after_channel))
     state['processing'] = len(rows)
@@ -657,16 +687,56 @@ async def process_round(bot: Bot, after_channel: int = 0) -> int:
 
 
 async def process_loop(bot: Bot) -> None:
+    """Refill free slots without waiting for the slowest channel in a batch."""
     cursor = 0
-    while True:
+    active = {}
+
+    async def run(post, channel):
         try:
-            cursor = await process_round(bot, cursor)
-        except Exception as exc:
-            log.exception("process loop error")
-            state["last_error"] = str(exc)[:150]
-            await alert_admins(bot, "process-loop", "Сбой цикла обработки материалов. Проверьте журнал приложения.")
-        state["processing"] = 0
-        await asyncio.sleep(10)
+            async with asyncio.timeout(240):
+                await process_post(bot, post, channel)
+        except Exception:
+            log.exception('processing failed: post_id=%s', post['id'])
+            await defer_processing(post, 'Ошибка обработки — повтор через 15 минут')
+
+    try:
+        while True:
+            for cid, task in list(active.items()):
+                if task.done():
+                    try:
+                        task.result()
+                    except Exception:
+                        log.exception('processing task failed: channel=%s', cid)
+                    del active[cid]
+            try:
+                if len(active) < 3:
+                    channels = await db.fetch_all('SELECT * FROM channels WHERE paused=0 ORDER BY (id<=?),id', (cursor,))
+                    for channel in channels:
+                        cid = channel['id']
+                        if cid in active or runtime.channel_lock(cid).locked():
+                            continue
+                        if not await access.owner_has_access(channel['owner_id']):
+                            continue
+                        if news_policy.realtime(channel) and not news_policy.window_open(channel, now_utc()):
+                            continue
+                        post = await db.fetch_one("SELECT * FROM posts WHERE channel_id=? AND status='new' "
+                            "AND (?=0 OR is_manual=1) AND (publish_at IS NULL OR publish_at<=now()) "
+                            "ORDER BY created_at DESC,id DESC LIMIT 1", (cid, channel.get('business_mode',0)))
+                        if post:
+                            active[cid] = asyncio.create_task(run(post, channel))
+                            cursor = cid
+                            if len(active) == 3:
+                                break
+                state['processing'] = len(active)
+            except Exception as exc:
+                log.exception('process loop error')
+                state['last_error'] = str(exc)[:150]
+                await alert_admins(bot, 'process-loop', 'Сбой цикла обработки материалов. Проверьте журнал приложения.')
+            await asyncio.sleep(1 if active else 10)
+    finally:
+        for task in active.values():
+            task.cancel()
+        await asyncio.gather(*active.values(), return_exceptions=True)
 
 
 async def publish_loop(bot: Bot) -> None:

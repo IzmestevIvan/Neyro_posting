@@ -266,7 +266,8 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         (channel_id,),
     )
     sources = await db.fetch_one(
-        "SELECT COUNT(*) AS n FROM sources WHERE channel_id = ?", (channel_id,)
+        "SELECT COUNT(*) FILTER(WHERE enabled=1) AS n, COUNT(*) FILTER(WHERE enabled=1 AND error IS NOT NULL) AS errors, "
+        "MAX(checked_at) AS checked_at FROM sources WHERE channel_id = ?", (channel_id,)
     )
     today_row = await db.fetch_one(
         "SELECT published, ai_requests FROM stats_daily WHERE channel_id = ? AND day = CURRENT_DATE",
@@ -292,7 +293,28 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
         (channel_id,),
     )
 
+    blockers = []
+    if channel['paused']:
+        blockers.append('Канал на паузе — снимите паузу в настройках.')
+    if channel.get('business_mode'):
+        blockers.append('Режим бизнеса: публикация только после вашего согласования во вкладке «Посты».')
+        if not channel.get('business_auto'):
+            blockers.append('Ежедневная подготовка выключена. Подготовьте пост вручную или включите предложения в досье.')
+    else:
+        if not channel['autopost']:
+            blockers.append('Автопостинг выключен — материалы требуют ручного согласования.')
+        if not sources['n']:
+            blockers.append('Нет включённых источников. Добавьте канал или RSS во вкладке «Источники».')
+        elif sources['errors']:
+            blockers.append(f"Источники с ошибками: {sources['errors']} из {sources['n']}. Проверьте вкладку «Источники».")
+        if channel['digest_enabled']:
+            blockers.append(f"Включён дайджест: выпуск в {channel['digest_time']} ({channel['tz']}), а не отдельные посты.")
+    if not scheduler.news_policy.window_open(channel):
+        blockers.append(f"Сейчас вне окна работы {channel['window_start']}:00–{channel['window_end']}:00 ({channel['tz']}).")
+
     return {
+        'blockers': blockers,
+        'sources_checked_at': sources['checked_at'],
         'waiting': waiting,
         'last_rejection': last_rejection,
         "published": (totals or {}).get("published") or 0,

@@ -29,6 +29,7 @@ const assert = require('node:assert/strict');
           signature_text:'Подписаться',signature_url:'',watermark:1,watermark_position:'bottom-right',logo_configured:true};
         channel=c; boot={channels:[c],user:{is_admin:true,has_access:true,id:1,max_channels:5,daily_limit:100}, bot_username:'testbot'};
         window.fixtureStats={today:3,pending:0,subscribers:1234,remaining:97,sources:2,queued:0,mode:'автопостинг',
+          blockers:['Канал на паузе — снимите паузу в настройках. Нет включённых источников. Добавьте канал или RSS во вкладке «Источники».'],
           posts_chart:[],subscribers_chart:[],waiting:{},last_rejection:{created_at:new Date().toISOString(),reason:'Недостаточно просмотров для выбранного фильтра'}};
         api=async url => {
           if(url==='/admin/monitoring')return {system:{cpu:12,ram_percent:60,ram_used:1.2,ram_total:2,disk_percent:70,disk_used:17,disk_total:25,process_mb:180,activity:'Проверка источников'},capacity:{users:30,channels:120,active_channels:100,database_bytes:1000000},queue:{new:2,pending:3,ready:4,publishing:1,attention:0},events:[{title:'ИИ временно недоступен',explanation:'Материал сохранён, следующая попытка позже.',detail:'HTTP 503',time:new Date().toISOString()}]};
