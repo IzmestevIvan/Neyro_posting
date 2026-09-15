@@ -438,20 +438,34 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
         # All review candidates, including manual drafts, stay in the Mini App.
 
 
-async def publish_due(bot: Bot) -> None:
+async def publish_due(bot: Bot, *, active=None) -> None:
     if await publisher.recover_stale_deliveries():
         await alert_admins(bot, 'delivery', 'Прерванная отправка требует сверки с каналом. Автоматический повтор отключён.')
     await expire_news()
     eligible = []
-    for channel in await db.fetch_all('SELECT * FROM channels WHERE paused=0 AND autopost=1'):
+    for channel in await db.fetch_all('SELECT * FROM channels WHERE paused=0 AND autopost=1 AND business_mode=0'):
+        if active is not None and channel['id'] in active:
+            continue
+        progress = await db.fetch_one("SELECT max(published_at) AS last, "
+            "count(*) FILTER(WHERE status IN ('publishing','uncertain','partial')) AS sending "
+            "FROM posts WHERE channel_id=?", (channel['id'],))
+        if progress['sending']:
+            continue
+        pace = PACE_MODES.get(channel['pace'],0)
+        if pace and progress['last']:
+            interval = timedelta(seconds=((channel['window_end']-channel['window_start']) % 24 or 24)*3600/pace)
+            if progress['last']+interval>now_utc():
+                continue
         if news_policy.window_open(channel, now_utc()) and await access.owner_has_access(channel['owner_id']) and await publisher.quota_left(channel['owner_id']) > 0:
             eligible.append(channel['id'])
     rows = await db.fetch_all(
         "SELECT * FROM (SELECT DISTINCT ON (p.channel_id) p.*,c.owner_id FROM posts p "
         "JOIN channels c ON c.id=p.channel_id WHERE p.status='approved' AND p.channel_id=ANY(?::bigint[]) "
         "AND (p.publish_at IS NULL OR p.publish_at<=?) "
-        "ORDER BY p.channel_id,p.created_at DESC,p.id DESC) candidates ORDER BY created_at LIMIT 120",
-        (eligible, db.utcnow()),
+        "ORDER BY p.channel_id,p.created_at DESC,p.id DESC) candidates "
+        "ORDER BY (SELECT max(published_at) FROM posts sent WHERE sent.channel_id=candidates.channel_id "
+        "AND sent.status='published') ASC NULLS FIRST,created_at LIMIT ?",
+        (eligible, db.utcnow(),120 if active is None else max(0,2-len(active))),
     )
     async def send(post):
         channel = await db.fetch_one("SELECT * FROM channels WHERE id = ?", (post["channel_id"],))
@@ -472,7 +486,11 @@ async def publish_due(bot: Bot) -> None:
         except Exception:
             # publish_post already recorded the attempt and the reason.
             log.warning("публикация поста %s не удалась", post["id"], exc_info=True)
-    await runtime.bounded_map(rows, send, 2)
+    if active is None:
+        await runtime.bounded_map(rows, send, 2)
+    else:
+        for post in rows:
+            active[post['channel_id']] = asyncio.create_task(send(post))
 
 
 async def run_digest(bot: Bot, channel: dict) -> None:
@@ -741,14 +759,28 @@ async def process_loop(bot: Bot) -> None:
 
 
 async def publish_loop(bot: Bot) -> None:
-    while True:
-        try:
-            await publish_due(bot)
-        except Exception as exc:
-            log.exception("publish loop error")
-            state["last_error"] = str(exc)[:150]
-            await alert_admins(bot, "publish-loop", "Сбой цикла публикации. Проверьте журнал приложения.")
-        await asyncio.sleep(20)
+    active = {}
+    try:
+        while True:
+            for cid, task in list(active.items()):
+                if task.done():
+                    try:
+                        task.result()
+                    except Exception:
+                        log.exception('delivery task failed: channel=%s',cid)
+                    del active[cid]
+            try:
+                if len(active)<2:
+                    await publish_due(bot, active=active)
+            except Exception as exc:
+                log.exception('publish loop error')
+                state['last_error'] = str(exc)[:150]
+                await alert_admins(bot,'publish-loop','Сбой цикла публикации. Проверьте журнал приложения.')
+            await asyncio.sleep(2 if active else 20)
+    finally:
+        for task in active.values():
+            task.cancel()
+        await asyncio.gather(*active.values(),return_exceptions=True)
 
 
 async def digest_loop(bot: Bot) -> None:

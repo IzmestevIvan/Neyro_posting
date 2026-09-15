@@ -713,6 +713,7 @@ async function refreshAdminMonitoring() {
       [q.ready, 'готовы / в дайджесте'], [q.publishing, 'публикуются'],
       [q.attention, 'требуют проверки доставки'],
     ].map(([v, label]) => `<div class="stat"><b>${Number(v) || 0}</b><i>${label}</i></div>`).join('');
+    $('#channelAudit').innerHTML = (data.channels || []).map(c => `<div class="card"><b>${esc(c.title || c.id)}</b><p class="hint">${esc(c.status)}</p><p class="hint">Последняя публикация: ${esc(ago(c.last_published) || 'не было')} · Проверка источников: ${esc(ago(c.checked_at) || 'не было')}</p></div>`).join('') || '<p class="hint">Каналов пока нет.</p>';
     $('#adminUpdated').textContent = `Обновлено: ${new Date().toLocaleTimeString('ru-RU')}`;
   } catch (error) {
     if (adminOpen) $('#adminUpdated').textContent = `Не удалось обновить показатели: ${error.message}. Показаны последние полученные данные.`;

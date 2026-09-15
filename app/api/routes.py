@@ -397,7 +397,27 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
         "pg_database_size(current_database()) AS database_bytes"
     )
     from app.core.operations import recent_events
+    channels = await db.fetch_all("SELECT c.id,c.title,c.paused,c.autopost,c.business_mode,c.digest_enabled,c.window_start,c.window_end,c.tz, "
+        "(SELECT count(*) FROM sources s WHERE s.channel_id=c.id AND enabled=1) AS sources, "
+        "(SELECT max(checked_at) FROM sources s WHERE s.channel_id=c.id AND enabled=1) AS checked_at, "
+        "(SELECT max(published_at) FROM posts p WHERE p.channel_id=c.id) AS last_published, "
+        "(SELECT min(publish_at) FROM posts p WHERE p.channel_id=c.id AND p.status='approved') AS next_at, "
+        "(SELECT count(*) FROM posts p WHERE p.channel_id=c.id AND p.status IN ('uncertain','partial')) AS uncertain "
+        "FROM channels c ORDER BY c.id")
+    for c in channels:
+        if c['paused']: status = 'На паузе'
+        elif c['business_mode']: status = 'Бизнес: требуется согласование'
+        elif not c['autopost']: status = 'Автопостинг выключен'
+        elif c['uncertain']: status = 'Требуется сверка предыдущей отправки'
+        elif not c['sources']: status = 'Нет включённых источников'
+        elif not scheduler.news_policy.window_open(c): status = 'Вне рабочего окна'
+        elif c['digest_enabled']: status = 'Включён дайджест'
+        elif c['next_at'] and c['next_at'] < db.utcnow()-timedelta(minutes=10): status = 'Очередь просрочена: проверьте квоту и темп'
+        elif not c['checked_at'] or c['checked_at'] < db.utcnow()-timedelta(minutes=15): status = 'Источники давно не проверялись'
+        else: status = 'Ожидает подходящий материал / время публикации'
+        c['status'] = status
     return {"system": await _system_health(), "queue": queue, "capacity": capacity,
+            'channels': channels,
             "events": await asyncio.to_thread(recent_events)}
 
 

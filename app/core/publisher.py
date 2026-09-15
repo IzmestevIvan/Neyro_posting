@@ -251,6 +251,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                 channel = dict(current_channel)
                 if channel['paused'] or not channel['autopost'] or not news_policy.window_open(channel):
                     raise AlreadyPublished('Автопубликация приостановлена или рабочее окно закрыто')
+                if await conn.fetchval("SELECT 1 FROM posts WHERE channel_id=$1 AND status IN ('publishing','uncertain','partial') LIMIT 1",channel['id']):
+                    raise AlreadyPublished('Предыдущая отправка ещё выполняется или требует сверки')
                 from app.config import PACE_MODES
                 pace = PACE_MODES.get(channel['pace'],0)
                 if pace:
@@ -262,6 +264,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             fresh = await conn.fetchrow('SELECT * FROM posts WHERE id=$1 FOR UPDATE', post['id'])
             if not fresh or fresh['channel_id'] != channel['id'] or fresh['status'] not in CLAIMABLE:
                 raise AlreadyPublished('пост недоступен для публикации или уже отправляется')
+            if background and fresh['publish_at'] and fresh['publish_at'] > datetime.now(timezone.utc):
+                raise AlreadyPublished('Время публикации ещё не наступило')
             if fresh['business_draft'] and (background or not approved_by_user):
                 raise AlreadyPublished('Бизнес-черновик нельзя отправлять без согласования')
             if (current_channel['business_mode'] or fresh['business_draft']) and fresh['text_out'] != approved_text:
