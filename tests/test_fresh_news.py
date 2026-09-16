@@ -13,6 +13,23 @@ TEXT = 'В городе открылась новая библиотека. Вх
 
 
 @pytest.mark.asyncio
+async def test_poll_saves_age_matched_popularity_snapshot(store, channel, monkeypatch):
+    now = store.utcnow()
+    channel = dict(channel, window_start=0, window_end=24)
+    source_id = await store.insert("INSERT INTO sources(channel_id,kind,ref,created_at) VALUES(?,'tg','age_news',now())", (channel['id'],))
+    source = await store.fetch_one('SELECT * FROM sources WHERE id=?', (source_id,))
+    items = [RawItem(f'age_news/{i}',f'https://t.me/age_news/{i}',TEXT,views=v,
+                     date=(now-timedelta(minutes=10-i)).isoformat()) for i,v in enumerate([100,200,300,50])]
+    monkeypatch.setattr(scheduler,'fetch_source',AsyncMock(return_value=(items,'News')))
+    assert await scheduler.poll_source(None,channel,source) == 1
+    post = await store.fetch_one('SELECT * FROM posts WHERE source_id=?',(source_id,))
+    assert post['views'] == 50 and post['popularity_threshold'] == 200
+    # A later donor median cannot retroactively change this observation.
+    await store.execute('UPDATE sources SET median_views=999999 WHERE id=?',(source_id,))
+    assert (await store.fetch_one('SELECT popularity_threshold FROM posts WHERE id=?',(post['id'],)))['popularity_threshold'] == 200
+
+
+@pytest.mark.asyncio
 async def test_disabled_filter_rechecks_only_recent_matching_rejections(store, channel):
     ids = []
     for uid, reason, status in [('hit', 'ниже медианы источника (2<100)', 'filtered'),

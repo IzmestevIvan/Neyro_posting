@@ -69,3 +69,24 @@ async def test_pool_database_lifecycle(store):
     assert await key_pool.candidates() == []
     await routes.remove_api_key(key_id, {'tg_id':1, 'is_admin':1})
     assert await key_pool.overview() == []
+
+
+@pytest.mark.asyncio
+async def test_auth_key_saved_deduplicated_and_hidden(store):
+    from app.core.operations import redact
+    secret = 'AQ.' + 'synthetic_test_only_' * 3
+    assert await key_pool.add_many(secret+'\n'+secret) == 1
+    assert (await key_pool.candidates())[0]['secret'] == secret
+    assert secret not in str(await key_pool.overview())
+    assert secret not in redact('request failed: '+secret)
+    assert '[api-key]' in redact(secret)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('key',['AQ.short','AQ.'+'x'*510,'AQ.'+'x'*25+' space','AQ.'+'x'*25+'<script>'])
+async def test_bad_auth_key_does_not_reach_database(key,monkeypatch):
+    connect=AsyncMock()
+    monkeypatch.setattr(key_pool.db,'connect',connect)
+    with pytest.raises(ValueError):
+        await key_pool.add_many(key)
+    connect.assert_not_awaited()

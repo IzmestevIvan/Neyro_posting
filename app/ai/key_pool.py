@@ -14,8 +14,10 @@ async def overview():
 
 async def add_many(raw: str):
     keys = list(dict.fromkeys(line.strip() for line in raw.splitlines() if line.strip()))
-    if not keys or len(keys) > MAX_KEYS or any(not re.fullmatch(r'AIza[A-Za-z0-9_-]{35}', key) for key in keys):
-        raise ValueError('Введите до 20 ключей Gemini, каждый с новой строки. Ключ начинается с AIza и содержит 39 символов.')
+    # Auth keys are opaque and have a different length from legacy standard keys.
+    # This only checks safe input syntax; Google verifies permissions and validity.
+    if not keys or len(keys) > MAX_KEYS or any(not re.fullmatch(r'(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_.-]{20,509})', key) for key in keys):
+        raise ValueError('Введите до 20 ключей Gemini из Google AI Studio, каждый с новой строки. Поддерживаются AIza… и AQ.…; внутри ключа не должно быть пробелов.')
     pool = await db.connect()
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute('LOCK TABLE service_api_keys IN SHARE ROW EXCLUSIVE MODE')

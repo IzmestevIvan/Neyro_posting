@@ -27,7 +27,7 @@ from app.config import (
     PACE_MODES,
     TIMEZONES,
 )
-from app.core import promo, publisher, scheduler, watermark, runtime, business
+from app.core import promo, publisher, scheduler, watermark, runtime, business, business_media
 from app.sources import rss, telegram_web
 
 router = APIRouter(prefix="/api")
@@ -416,7 +416,10 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
         elif not c['checked_at'] or c['checked_at'] < db.utcnow()-timedelta(minutes=15): status = 'Источники давно не проверялись'
         else: status = 'Ожидает подходящий материал / время публикации'
         c['status'] = status
+    from app.ai.metrics import metrics
+    from app.core.runtime import AI_CONCURRENCY
     return {"system": await _system_health(), "queue": queue, "capacity": capacity,
+            'api_load': {**metrics.snapshot(), 'concurrency': AI_CONCURRENCY},
             'channels': channels,
             "events": await asyncio.to_thread(recent_events)}
 
@@ -431,6 +434,7 @@ async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> li
     )
     for row in rows:
         row["media"] = json.loads(row["media"] or "[]")
+        row['media_revision'] = business_media.revision(row['media'])
         row["fact_check"] = json.loads(row["fact_check"]) if row["fact_check"] else None
     return rows
 
@@ -460,6 +464,31 @@ async def post_action(
         raise HTTPException(404, "пост не найден")
     channel = await owned_channel(post["channel_id"], user)
     bot = request.app.state.bot
+
+    if action in ('photo', 'remove_photo') and post.get('business_draft'):
+        if post['status'] != 'pending':
+            raise HTTPException(409, 'Фото можно изменить только до согласования')
+        if request.headers.get('X-Media-Revision') != business_media.revision(post['media']):
+            raise HTTPException(409, 'Фото изменилось. Обновите ленту')
+        media = []
+        if action == 'photo':
+            content = bytearray()
+            async for chunk in request.stream():
+                content.extend(chunk)
+                if len(content) > business_media.MAX_UPLOAD:
+                    raise HTTPException(413, 'Фото: максимум 4 МБ')
+            try:
+                async with runtime.source_slots:
+                    media = [await asyncio.to_thread(business_media.normalize, bytes(content))]
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        pool = await db.connect()
+        async with pool.acquire() as conn:
+            changed = await conn.fetchval("UPDATE posts SET media=$1 WHERE id=$2 AND status='pending' AND media=$3 RETURNING id",
+                json.dumps(media), post_id, post['media'])
+        if not changed:
+            raise HTTPException(409, 'Пост изменился. Обновите ленту')
+        return {'ok': True}
 
     if action in ("confirm_sent", "confirm_absent"):
         try:
@@ -515,16 +544,18 @@ async def post_action(
 
     if action == "approve":
         approved_text = None
+        approved_media = None
         if channel.get('business_mode') or post.get('business_draft'):
             try:
                 payload = await request.json()
             except ValueError:
                 payload = {}
             approved_text = payload.get('text') if isinstance(payload, dict) else None
+            approved_media = payload.get('media_revision') if isinstance(payload, dict) else None
         if await publisher.quota_left(user["tg_id"]) <= 0:
             raise HTTPException(429, "исчерпан дневной лимит")
         try:
-            await publisher.publish_post(bot, post, channel, approved_by_user=True, approved_text=approved_text)
+            await publisher.publish_post(bot, post, channel, approved_by_user=True, approved_text=approved_text, approved_media=approved_media)
         except publisher.QuotaExceeded as exc:
             raise HTTPException(429, str(exc)) from exc
         except publisher.DeliveryUncertain as exc:
@@ -691,9 +722,12 @@ async def create_promo(payload: dict = Body(...), user: dict = Depends(current_u
     await require_admin(user)
     try:
         codes = await promo.create_codes(
-            count=int(payload.get("count", 1)),
+            count=payload.get("count", 1),
             plan=str(payload.get("plan", "pro")),
             note=str(payload.get("note", "")) or None,
+            overrides=payload.get('overrides'),
+            activation_days=payload.get('activation_days'),
+            assigned_to=payload.get('assigned_to'),
         )
     except (promo.PromoError, ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -786,6 +820,23 @@ async def admin_update_user(
 ) -> dict:
     await require_admin(user)
     fields = {}
+    if set(payload)-{'plan','daily_limit','max_channels','extend_days','blocked'}:
+        raise HTTPException(422, 'Неизвестные настройки клиента')
+    if 'plan' in payload:
+        if not isinstance(payload['plan'], str) or payload['plan'] not in promo.PLANS:
+            raise HTTPException(422, 'Неизвестный тариф')
+        fields.update({k:v for k,v in promo.PLANS[payload['plan']].items() if k!='days'})
+        fields['plan'] = payload['plan']
+    if 'max_channels' in payload:
+        try:
+            fields['max_channels'] = promo.integer(payload['max_channels'],1,120,'Каналов')
+        except promo.PromoError as exc:
+            raise HTTPException(422,str(exc)) from exc
+    if 'extend_days' in payload:
+        try:
+            promo.integer(payload['extend_days'],0,3650,'Продление в днях')
+        except promo.PromoError as exc:
+            raise HTTPException(422,str(exc)) from exc
     if "daily_limit" in payload:
         value = payload['daily_limit']
         if type(value) is not int or not 0 <= value <= 100000:
@@ -795,8 +846,20 @@ async def admin_update_user(
         if type(payload['blocked']) is not bool:
             raise HTTPException(422, 'blocked: ожидается true/false')
         fields["blocked"] = int(payload["blocked"])
-    if not fields:
+    if not fields and not payload.get('extend_days'):
         raise HTTPException(400, "нечего менять")
-    assignments = ", ".join(f"{key} = ?" for key in fields)
-    await db.execute(f"UPDATE users SET {assignments} WHERE tg_id = ?", (*fields.values(), tg_id))
-    return await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
+    pool = await db.connect()
+    async with pool.acquire() as conn, conn.transaction():
+        target = await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1 FOR UPDATE', tg_id)
+        if not target:
+            raise HTTPException(404,'Клиент не найден')
+        if payload.get('extend_days'):
+            fields['access_until'] = max(target['access_until'] or db.utcnow(),db.utcnow()) + timedelta(days=payload['extend_days'])
+        if 'daily_limit' in payload or 'max_channels' in payload:
+            plan = fields.get('plan', target['plan'])
+            expected = promo.PLANS.get(plan,{})
+            if any(fields.get(k,target[k]) != expected.get(k) for k in ('daily_limit','max_channels')):
+                fields['plan']='custom'
+        assignments = ', '.join(f'{key}=${i}' for i,key in enumerate(fields,1))
+        result = await conn.fetchrow(f'UPDATE users SET {assignments} WHERE tg_id=${len(fields)+1} RETURNING *',*fields.values(),tg_id)
+        return dict(result)

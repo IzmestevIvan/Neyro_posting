@@ -509,3 +509,98 @@ button:disabled { transform:none; }
   #apiKeyList .form-actions > button { flex-basis:100px; }
   .group > summary { gap:10px; }
 }
+.business-photo { min-width: 0; margin: 12px 0; }
+.business-photo input { width: 100%; max-width: 100%; box-sizing: border-box; }
+.business-photo input::file-selector-button { border: 1px solid #456057; border-radius: 10px; padding: 12px; margin: 8px 10px 8px 0; background: #294239; color: #edf5ef; font: inherit; cursor: pointer; }
+.business-photo a { overflow-wrap: anywhere; }
+
+/* Shared visual contract: the same controls and spacing in every workflow. */
+:root { --control-height:48px; --space:16px; }
+html { scroll-padding-bottom:calc(100px + env(safe-area-inset-bottom)); }
+a { color:var(--accent); text-underline-offset:3px; }
+button, input, select, textarea, summary { touch-action:manipulation; }
+button { min-height:44px; }
+button:disabled { opacity:1; background:var(--surface-3); color:var(--muted); box-shadow:none; }
+.post .acts button:disabled, .business-edit button:disabled, .source-shortcuts button:disabled,
+.form-actions button:disabled, .accent:disabled { background:var(--surface-3); color:var(--muted); border-color:var(--line); box-shadow:none; }
+input:disabled, select:disabled { opacity:.6; cursor:not-allowed; }
+input[type=checkbox]:disabled { opacity:.45; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+select, input[type=text], input[type=password], input[type=number], input[type=url], textarea {
+  min-height:var(--control-height); font-size:16px; line-height:1.45;
+}
+input[type=url] { width:100%; padding:12px 13px; appearance:none; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--surface-2); color:var(--text); font-family:inherit; }
+.label { display:block; margin:0; line-height:1.5; }
+label.label { display:grid; gap:8px; }
+.group > .body { gap:16px; }
+.group > .body > .hint { margin:0; }
+.group > summary { gap:12px; line-height:1.4; }
+.group > summary > span { min-width:0; }
+.chip { min-height:44px; padding:10px 12px; }
+.chip.on { color:#173225; }
+.stat i { display:block; }
+.select-wrap.compact { max-width:55%; }
+.pair .select-wrap.compact { max-width:none; }
+.select-wrap.compact select { min-height:44px; }
+.head { align-items:center; gap:12px; }
+.brand > div { min-width:0; }
+.head h1 { font-size:18px; }
+#openAdmin { width:46px; height:46px; padding:0; flex:none; }
+.status { font-size:12px; line-height:1.5; }
+.post header, .ad header { flex-wrap:wrap; row-gap:6px; }
+.post header > span:first-child, .ad header .who { flex:1 1 150px; }
+.post img { max-height:560px; object-fit:contain; background:var(--bg); }
+.post .acts { flex-wrap:wrap; }
+.post .acts .ok { flex:1 1 100%; }
+.post .acts .no { flex:0 0 48px; }
+.business-photo { padding:16px; margin:16px 0; background:var(--surface-2); border:1px solid var(--line); border-radius:12px; }
+.business-photo .upload-control { background:var(--surface); border-color:var(--line); }
+.business-photo .hint { margin:10px 0 0; }
+.business-photo .note { margin:10px 0 0; }
+.business-photo > a { display:block; margin:12px 0; font-size:13px; }
+.business-photo > button { padding:10px 14px; margin-top:12px; border:1px solid var(--line); }
+.business-edit { margin:16px 0 0; padding-top:16px; border-top:1px solid var(--line); }
+.business-edit label { display:grid; gap:8px; color:var(--muted); font-size:13px; }
+.business-edit button { padding:12px 16px; border:1px solid var(--line); }
+.business-edit [data-act=save-edit] { background:var(--accent); color:#173225; }
+.business-research { margin:16px 0 0; padding-top:12px; border-top:1px solid var(--line); }
+.business-research summary { cursor:pointer; font-size:13px; color:var(--muted); }
+.business-research p { font-size:13px; }
+.copy-source input[type=checkbox] { appearance:none; margin:0; width:22px; height:22px; flex:0 0 22px; border:1px solid var(--muted); border-radius:6px; background:var(--surface-2); }
+.copy-source input[type=checkbox]::after { display:none; }
+.copy-source input[type=checkbox]:checked { background:var(--accent); border-color:var(--accent); }
+.copy-source input[type=checkbox]:checked::after { display:block; width:5px; height:10px; top:3px; left:7px; border:solid #173225; border-width:0 2px 2px 0; border-radius:0; background:none; transform:rotate(45deg); }
+#sourceBatchPanel button { padding:12px 16px; margin-top:12px; }
+#sourceBatchCancel { border:1px solid var(--line); }
+.key-card .form-actions > button { flex:1 1 100%; }
+#channelAudit, #adminEvents { display:grid; gap:12px; }
+#channelAudit .card { background:var(--surface-2); }
+#channelAudit .hint { margin:8px 0 0; }
+.ad .contacts a, .ad .contacts span { min-width:0; overflow-wrap:anywhere; }
+.ad .acts button { flex:1 1 110px; }
+.ad .acts button[aria-label] { flex:0 0 48px; }
+.toast { width:max-content; max-width:min(480px,calc(100vw - 32px)); padding:14px 16px; bottom:calc(88px + env(safe-area-inset-bottom)); line-height:1.5; overflow-wrap:anywhere; }
+.toast.err { background:#472a2c; color:#ffe3e3; border:1px solid #a85e63; }
+.nav button { min-width:0; }
+@media(min-width:900px) {
+  .nav { left:max(24px,calc(50% - 476px)); }
+  .nav .badge { left:auto; right:6px; top:6px; margin:0; }
+}
+@media(max-width:380px) {
+  main { padding-left:12px; padding-right:12px; }
+  .post, .ad, .card:not(.group) { padding:14px; }
+  .source-shortcuts { display:grid; grid-template-columns:1fr; }
+  .head h1 { font-size:17px; }
+  .history-item .acts button { flex-basis:100%; }
+  .row:has(.pair) { align-items:flex-start; flex-wrap:wrap; }
+  .row:has(.pair) > span:first-child { flex-basis:100%; }
+}
+.access-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; width:100%; }
+.access-grid label { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:13px; }
+.access-grid input,.access-grid select { width:100%; min-width:0; box-sizing:border-box; }
+.client-access { flex-direction:column; align-items:stretch; gap:12px; }
+/* Bounded API telemetry, readable on narrow Telegram webviews. */
+.api-capacity { width: 100%; height: 10px; margin-top: 12px; accent-color: #a7e5bd; }
+.api-chart { display: flex; align-items: flex-end; gap: 4px; height: 72px; margin: 16px 0; }
+.api-bar { flex: 1; min-width: 0; position: relative; background: #95d8bf; border-radius: 3px 3px 0 0; overflow: hidden; }
+.api-bar span { display: block; position: absolute; bottom: 0; width: 100%; background: #ff7070; }

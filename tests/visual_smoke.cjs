@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
   fs.mkdirSync(out, {recursive:true});
   const failures = [];
   try {
-    for (const width of [320, 390, 768, 1280]) {
+    for (const width of [320, 390, 768, 900, 1280]) {
       const page = await browser.newPage({viewport:{width, height:844}, deviceScaleFactor:1});
       page.on('pageerror', e => failures.push(e.message));
       await page.route('**/*', route => {
@@ -22,6 +22,22 @@ const assert = require('node:assert/strict');
         return route.fulfill({contentType:'application/json', body:'[]'});
       });
       await page.goto('http://visual.test/');
+      const capture = async name => {
+        if(name !== 'error') await page.evaluate(()=>document.querySelectorAll('.toast').forEach(el=>el.remove()));
+        await page.screenshot({path:path.join(out,`${width}-${name}.png`), fullPage:!name.startsWith('tour-')});
+        const problems = await page.evaluate(() => {
+          const result = [];
+          if (document.documentElement.scrollWidth > innerWidth) result.push('page overflow');
+          for (const el of document.querySelectorAll('button,input,select,textarea,.post,.ad,.adminrow')) {
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height || !el.checkVisibility()) continue;
+            if (r.left < -1 || r.right > innerWidth + 1) result.push(`offscreen ${el.id || el.className || el.tagName}`);
+            if (el.tagName === 'BUTTON' && r.height < 43 && !el.closest('.dots')) result.push(`small button ${el.id || el.textContent}`);
+          }
+          return result;
+        });
+        failures.push(...problems.map(p => `${width}px ${name}: ${p}`));
+      };
       await page.evaluate(() => {
         const c = {id:1,title:'Тестирование NeuroPost — длинное название канала', username:'test', owner_id:1,
           autopost:1,paused:0,pace:'24',delay_mode:'30-90',quality:'super',lang:'ru',tz:'Europe/Moscow',sources:2,
@@ -32,9 +48,9 @@ const assert = require('node:assert/strict');
           blockers:['Канал на паузе — снимите паузу в настройках. Нет включённых источников. Добавьте канал или RSS во вкладке «Источники».'],
           posts_chart:[],subscribers_chart:[],waiting:{},last_rejection:{created_at:new Date().toISOString(),reason:'Недостаточно просмотров для выбранного фильтра'}};
         api=async url => {
-          if(url==='/admin/monitoring')return {system:{cpu:12,ram_percent:60,ram_used:1.2,ram_total:2,disk_percent:70,disk_used:17,disk_total:25,process_mb:180,activity:'Проверка источников'},capacity:{users:30,channels:120,active_channels:100,database_bytes:1000000},queue:{new:2,pending:3,ready:4,publishing:1,attention:0},events:[{title:'ИИ временно недоступен',explanation:'Материал сохранён, следующая попытка позже.',detail:'HTTP 503',time:new Date().toISOString()}]};
+          if(url==='/admin/monitoring')return {api_load:{started_at:new Date().toISOString(),active:4,waiting:8,concurrency:4,windows:{'15':{requests:150,errors:40,quota:30,server:5,transport:3,interrupted:2,fallbacks:32,average_ms:2500},'60':{requests:600,errors:160,fallbacks:120}},series:Array.from({length:15},(_,i)=>({requests:i+1,errors:i%4}))},system:{cpu:12,ram_percent:60,ram_used:1.2,ram_total:2,disk_percent:70,disk_used:17,disk_total:25,process_mb:180,activity:'Проверка источников'},capacity:{users:30,channels:120,active_channels:100,database_bytes:1000000},queue:{new:2,pending:3,ready:4,publishing:1,attention:0},events:[{title:'ИИ временно недоступен',explanation:'Материал сохранён, следующая попытка позже.',detail:'HTTP 503',time:new Date().toISOString()}]};
           if(url==='/admin/api-keys')return {keys:[{id:1,label:'Ключ Gemini №1',enabled:true,last_error:'Ограничение квоты или частоты запросов',cooldown_until:new Date(Date.now()+60000).toISOString()}],limit:20,server_key_configured:true};
-          if(url==='/admin/overview')return {totals:{posts:1234,published:222,ai_today:98},users:[{tg_id:123456789,first_name:'Пользователь с очень длинным именем',channels:4,daily_limit:100}],channels:[c]};
+          if(url==='/admin/overview')return {totals:{posts:1234,published:222,ai_today:98},users:[{tg_id:123456789,first_name:'Пользователь с очень длинным именем',channels:4,daily_limit:100,max_channels:5,plan:'custom',access_until:'2026-10-16T12:00:00Z'}],channels:[c]};
           if(url.includes('/stats'))return window.fixtureStats;
           if(url.includes('/sources'))return [{id:1,kind:'tg',ref:'very_long_source_name_123456789',title:'Название источника с длинным заголовком',enabled:1}];
           if(url.includes('/feed') && channel.business_mode)return [{id:123,business_draft:1,media:[],source_title:'Редактор компании',text_out:'Перед оснащением переговорной определите число участников, сценарии встреч и требования к звуку. Это поможет составить понятное техническое задание.',reason:'Требуется согласование. Проверьте терминологию.',created_at:new Date().toISOString()}];
@@ -61,7 +77,7 @@ const assert = require('node:assert/strict');
           } else { openPage(view); if(view==='home')renderStats(window.fixtureStats); if(view==='feed')await loadFeed(); }
           if(view==='settings')document.querySelectorAll('#page-settings > details').forEach(d=>d.open=true);
         }, view);
-        await page.screenshot({path:path.join(out,`${width}-${view}.png`), fullPage:true});
+        await capture(view);
         const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
         if(overflow) failures.push(`${width}px ${view}: horizontal overflow`);
         const visibleSupport = await page.locator('#supportLink').isVisible();
@@ -105,6 +121,67 @@ const assert = require('node:assert/strict');
           assert.ok((await page.locator('#businessStatus').textContent()).includes('Очистите ссылку'));
           assert.equal(await page.locator('#generateBusiness').isEnabled(),true);
         }
+      }
+      await page.evaluate(() => {
+        window.savedChannel = channel;
+        const original = api;
+        api = async (url, options) => {
+          if (url.includes('/ads?')) return [{id:1,advertiser:'Компания с длинным названием — предложение о сотрудничестве',contacts:['@business_contact','advertising@example.company'],seen_count:12,status:'new',source_title:'Партнёрский канал',raw_text:'Предложение по размещению рекламы. Подробности и условия сотрудничества.',reasons:['Найдены контакты и предложение услуги']}];
+          if (url.endsWith('/history')) return ['published','uncertain','partial','failed'].map((status,i)=>({id:i,status,source_title:'Источник с длинным названием',preview:'Текст публикации для проверки истории.',reason: status === 'published' ? null : 'Проверьте результат доставки в канале перед повторной отправкой.'}));
+          return original(url,options);
+        };
+      });
+      for (const state of ['ads','ads-archive','history','source-panels','business-edit','business-photo','empty-feed','empty-ads','admin-expanded','error','gate','onboarding']) {
+        await page.evaluate(async state => {
+          if (state === 'ads' || state === 'ads-archive') { openPage('ads'); await switchAds(state === 'ads' ? 'active' : 'archive'); document.querySelectorAll('.ad-reasons').forEach(el=>el.open=true); }
+          if (state === 'history') { openPage('feed'); switchFeed('history'); await loadHistory(); }
+          if (state === 'source-panels') {
+            openPage('sources'); $('#sourceBatchPanel').hidden=false; $('#copySourcesPanel').open=true;
+            $('#copySourceList').innerHTML='<label class="copy-source"><input type="checkbox" checked><span>Источник с длинным названием<small>https://example.org/very/long/feed/address</small></span></label><label class="copy-source"><input type="checkbox"><span>Ещё один источник</span></label>';
+            $('#sourceBatchStatus').textContent='Не удалось прочитать один из источников. Проверьте адрес и повторите.';
+            $('#sourceBatchCancel').hidden=false;
+          }
+          if (state === 'business-edit') { openPage('feed'); switchFeed('pending'); await loadFeed(); $('#feed [data-act="edit"]').click(); }
+          if (state === 'business-photo') {
+            const original=api;
+            const canvas=document.createElement('canvas'); canvas.width=1200; canvas.height=800;
+            const ctx=canvas.getContext('2d'); ctx.fillStyle='#527b66'; ctx.fillRect(0,0,1200,800);
+            ctx.fillStyle='#dce9df'; ctx.fillRect(200,160,800,480);
+            const data=canvas.toDataURL('image/jpeg').split(',')[1];
+            api=async (url,options)=>url.endsWith('/feed') ? [{id:124,business_draft:1,media_revision:'fixture',media:[{type:'photo',data,source:'https://example.org/projects/one'}],text_out:'Материал компании с фотографией проекта. Проверьте текст и изображение перед согласованием.',source_title:'Редактор компании'}] : original(url,options);
+            await loadFeed(); api=original;
+          }
+          if(state==='empty-feed' || state==='empty-ads') {
+            const original=api; api=async url=>[];
+            if(state==='empty-feed') {openPage('feed'); await loadFeed();}
+            else {openPage('ads'); await loadAds();}
+            api=original;
+          }
+          if (state === 'admin-expanded') {
+            $('#openAdmin').click(); await loadAdmin(); await refreshAdminMonitoring();
+            $('#channelAudit').innerHTML='<div class="card"><b>Компания с длинным названием</b><p class="hint">Ожидает согласования владельца</p></div>';
+            document.querySelectorAll('#page-admin details').forEach(el=>el.open=true);
+          }
+          if (state === 'error') { $('#closeAdmin').click(); openBusiness(); toast('Предыдущее сообщение'); toast('Не удалось сохранить изменения. Проверьте подключение и повторите попытку.',true); }
+          if (state === 'gate') showGate();
+          if (state === 'onboarding') showOnboarding();
+        },state);
+        await capture(state);
+        if(state==='error') assert.equal(await page.locator('.toast').count(),1);
+        if(state==='business-edit') {
+          const colors=await page.locator('[data-act="approve"]').evaluate(el=>({disabled:el.disabled,bg:getComputedStyle(el).backgroundColor}));
+          assert.equal(colors.disabled,true);
+          assert.equal(colors.bg,'rgb(44, 60, 54)');
+        }
+      }
+      await page.evaluate(() => { document.querySelectorAll('.toast').forEach(e=>e.remove()); channel=window.savedChannel; enterNormalMode(); window.scrollTo(0,0); setupTour(); });
+      if(width <= 390) await page.setViewportSize({width,height:568});
+      for(let slide=1;slide<=6;slide++) {
+        await capture(`tour-${slide}`);
+        assert.equal(await page.locator('.slide:visible').count(),1);
+        const footer = await page.locator('.tour-foot').boundingBox();
+        assert.ok(footer.y + footer.height <= page.viewportSize().height + 1);
+        await page.locator('#tourNext').click();
       }
       await page.close();
     }

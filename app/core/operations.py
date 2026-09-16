@@ -51,6 +51,19 @@ def channel_scope(channel):
 
 
 def explain_error(detail, where):
+    loops = {'operations.process-loop':'подготовки постов','operations.publish-loop':'отправки постов','operations.poll-loop':'чтения источников','operations.stats-loop':'сбора статистики','operations.support':'поддержки'}
+    if where in loops:
+        return f'Повторяются сбои {loops[where]}', 'Операция несколько раз завершилась ошибкой. Это не подтверждение остановки всех каналов. Проверьте прогресс в админ-панели; если он отсутствует, передайте журнал технической поддержке.'
+    if where == 'operations.delivery':
+        if 'Не отправлен' in detail:
+            return 'Пост не отправлен', detail
+        if 'часть' in detail:
+            return 'Пост отправлен частично', detail
+        if 'неизвестен' in detail:
+            return 'Результат отправки неизвестен', detail
+        return 'Нужна сверка отправки', 'Проверьте историю публикаций и сам канал. Не повторяйте отправку, пока не проверите, появился ли пост.'
+    if 'TimeoutError' in detail and where == 'ai':
+        return 'ИИ не ответил вовремя', 'Один запрос превысил время ожидания. Результат попытки через резерв смотрите в следующих событиях; это не подтверждение остановки приложения.'
     if 'Обработка продолжена:' in detail:
         return '✅ Резервный ИИ ответил', 'Запрос выполнен через резерв. Это ещё не означает публикацию: материал должен пройти остальные проверки и расписание.'
     if 'HTTP 429' in detail:
@@ -87,6 +100,7 @@ def redact(text):
             text = text.replace(value, '[secret]')
     text = re.sub(r'\b\d{6,}:[A-Za-z0-9_-]{20,}', '[bot-token]', text)
     text = re.sub(r'AIza[A-Za-z0-9_-]{20,}', '[api-key]', text)
+    text = re.sub(r'AQ\.[A-Za-z0-9_.-]+', '[api-key]', text)
     text = re.sub(r'(?i)(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', text)
     return re.sub(r'(?i)(postgres(?:ql)?://)[^\s@]+@', r'\1[credentials]@', text)
 
@@ -135,7 +149,7 @@ class ErrorJournal(logging.Handler):
         while len(self.repeats) > 512:
             self.repeats.popitem(last=False)
         emergency = record.levelno >= logging.CRITICAL or record.name == 'operations.delivery'
-        if record.name in {'operations.ai', 'operations.process-loop', 'operations.publish-loop',
+        if record.name in {'operations.process-loop', 'operations.publish-loop',
                            'operations.poll-loop', 'operations.stats-loop', 'operations.support'}:
             emergency = emergency or (len(repeated) == 3 and now-repeated[0] < 3600)
         title, explanation = explain_error(detail, record.name)
@@ -165,12 +179,45 @@ class ErrorJournal(logging.Handler):
                         if now - self.last_sent.get(key, -10000) >= 1800][:4]
         if not selected and not self.overflow:
             return
-        lines = ['🚨 <b>Нейропостинг: требуется вмешательство</b>']
+        # Delivery events are verified immediately before notifying: a resolved post
+        # must not keep generating alerts from an old in-memory error queue.
+        from app import db
+        verified = []
+        for key, event in selected:
+            if event['where'] == 'operations.delivery':
+                match = re.search(r'пост #(\d+)', event['detail'], re.I)
+                if match:
+                    try:
+                        post = await db.fetch_one('SELECT status, (SELECT error_type FROM delivery_attempts d WHERE d.post_id=posts.id ORDER BY started_at DESC LIMIT 1) AS error_type FROM posts WHERE id=?', (int(match[1]),))
+                    except Exception:
+                        # No unverified action advice; retry notification after DB recovery.
+                        continue
+                    if not post or post['status'] not in ('failed','uncertain','partial'):
+                        with self.lock:
+                            self.pending.pop(key, None)
+                        continue
+                    status = post['status']
+                    cause = {'HTTPStatusError':'HTTP-сервис отклонил запрос при подготовке отправки.',
+                             'TelegramForbiddenError':'Telegram отказал боту в доступе.',
+                             'TelegramBadRequest':'Telegram отклонил содержимое или параметры отправки.',
+                             'UnsafeURL':'Медиа не прошло проверку безопасности.',
+                             'TelegramRetryAfter':'Telegram ограничил частоту отправки.'}.get(post.get('error_type'),'Причина сохранена в истории публикации.')
+                    event['detail'] = (
+                        f"Не отправлен пост #{match[1]}. {cause} Автоматические попытки завершены. Откройте историю канала: проверьте причину, медиа и права бота перед повтором."
+                        if status == 'failed' else
+                        f"Пост #{match[1]}: Telegram подтвердил только часть отправки. Автоматический повтор отключён. Сверьте сообщения в канале; не отправляйте весь пост повторно."
+                        if status == 'partial' else
+                        f"Пост #{match[1]}: результат отправки неизвестен. Автоматический повтор отключён. Сначала проверьте, появился ли пост в канале.")
+            verified.append((key,event))
+        selected = verified
+        if not selected and not self.overflow:
+            return
+        lines = ['⚠️ <b>Нейропостинг: состояние работы</b>']
         for key, event in selected:
             title, explanation = explain_error(event['detail'], event['where'])
             context = event.get('channel')
             target = f"Канал: {context['title'][:80]} · владелец {context['owner']}" if context else 'Общая проверка сервиса — конкретный канал не определён'
-            lines.append(f"<b>{html.escape(title)}</b>\n{html.escape(target)}\n{html.escape(explanation)}\nВремя: {event['time']} МСК. Событий: {event['count']}.")
+            lines.append(f"<b>{html.escape(title)}</b>\n{html.escape(target)}\n{html.escape(explanation)}\nПервое событие: {event['time']} МСК. Событий: {event['count']}.")
         overflow = self.overflow
         if overflow:
             lines.append(f'Ещё событий: {overflow}. Подробности сохранены в журнале.')

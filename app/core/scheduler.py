@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import random
+import statistics
 from collections import OrderedDict
 from time import monotonic
 from datetime import datetime, timedelta, timezone
@@ -66,6 +67,9 @@ async def alert_admins(bot: Bot, key: str, text: str, *, cooldown: timedelta = t
     from app.core.operations import ErrorJournal
     if any(isinstance(handler, ErrorJournal) for handler in logging.getLogger().handlers):
         logging.getLogger(f'operations.{key}').error(text)
+        return
+    if key == 'ai':
+        logging.getLogger('operations.ai').warning(text)
         return
     if not ADMIN_IDS:
         return
@@ -192,6 +196,27 @@ def _chronological(items: list) -> list:
     return [item for _, item in indexed]
 
 
+def popularity_threshold(item, items, now: datetime) -> Optional[int]:
+    """Compare only similarly aged posts; a fresh post cannot match yesterday's reach.
+
+    Missing dates or fewer than three peers mean insufficient evidence, not rejection.
+    Save the threshold with the observation so later processing never changes its age.
+    """
+    date = news_policy.source_date(item.date)
+    if date is None or date > now:
+        return None
+    age = max(300, (now - date).total_seconds())
+    peers = []
+    for peer in items:
+        peer_date = news_policy.source_date(peer.date)
+        if peer.uid == item.uid or peer_date is None or peer_date > now or peer.views <= 0:
+            continue
+        peer_age = max(300, (now - peer_date).total_seconds())
+        if age / 2 <= peer_age <= age * 2:
+            peers.append(peer.views)
+    return int(statistics.median(peers)) if len(peers) >= 3 else None
+
+
 async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) -> int:
     items, title = await fetch_source(client, source)
     median = 0 if source['kind']=='rss' else telegram_web.median_views(items)
@@ -227,10 +252,11 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
                     continue
                 await conn.execute(
                     "INSERT INTO posts (channel_id, source_id, uid, url, source_title, raw_text, media, "
-                    "views, status, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'new',$9)",
+                    "views, status, created_at, popularity_threshold) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'new',$9,$10)",
                     channel["id"], source["id"], uid, item.url,
                     item.source_title or source["title"], item.text[:16000],
                     json.dumps(item.media[:10], ensure_ascii=False), item.views, min(item_date, now_utc()) if item_date else db.utcnow(),
+                    popularity_threshold(item, items, now_utc()) if source['kind'] != 'rss' else None,
                 )
                 created += 1
             if items:
@@ -291,7 +317,7 @@ async def reconsider_filtered(channel_id: int) -> int:
         "UPDATE posts p SET status='new',reason=NULL,publish_at=NULL WHERE p.status='filtered' AND p.id IN ("
         "SELECT old.id FROM posts old JOIN channels c ON c.id=old.channel_id WHERE c.id=? "
         "AND old.status='filtered' AND old.is_manual=0 "
-        "AND ((c.hits_only=0 AND old.reason LIKE 'ниже медианы источника%') "
+        "AND ((c.hits_only=0 AND (old.reason LIKE 'ниже медианы источника%' OR old.reason LIKE 'ниже медианы ровесников источника%')) "
         "OR (c.media_only=0 AND old.reason='нет медиа')) "
         "AND old.created_at>=now()-CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 "
         "THEN interval '1 hour' ELSE interval '24 hours' END "
@@ -353,10 +379,9 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
         return await _reject(post, "filtered", f"стоп-слово «{hit}»", "filtered")
 
     if channel["hits_only"] and post["source_id"]:
-        source = await db.fetch_one("SELECT median_views FROM sources WHERE id = ?", (post["source_id"],))
-        median = (source or {}).get("median_views") or 0
+        median = post.get('popularity_threshold') or 0
         if median and post["views"] < median:
-            return await _reject(post, "filtered", f"ниже медианы источника ({post['views']}<{median})", "filtered")
+            return await _reject(post, "filtered", f"ниже медианы ровесников источника ({post['views']}<{median})", "filtered")
 
     prints = fingerprint(post["raw_text"] or "")
     duplicate_of = find_duplicate(prints, await _known_fingerprints(channel["id"], post["id"]))
@@ -440,7 +465,9 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
 
 async def publish_due(bot: Bot, *, active=None) -> None:
     if await publisher.recover_stale_deliveries():
-        await alert_admins(bot, 'delivery', 'Прерванная отправка требует сверки с каналом. Автоматический повтор отключён.')
+        for interrupted in await db.fetch_all("SELECT p.id,p.channel_id,c.title,c.owner_id FROM posts p JOIN channels c ON c.id=p.channel_id WHERE p.status IN ('uncertain','partial') ORDER BY p.id LIMIT 100"):
+            with channel_scope({'id':interrupted['channel_id'],'title':interrupted['title'],'owner_id':interrupted['owner_id']}):
+                await alert_admins(bot, 'delivery', f'Пост #{interrupted["id"]}: прерванная отправка требует сверки. Автоматический повтор отключён.')
     await expire_news()
     eligible = []
     for channel in await db.fetch_all('SELECT * FROM channels WHERE paused=0 AND autopost=1 AND business_mode=0'):

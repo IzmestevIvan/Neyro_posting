@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 from pathlib import Path
 import uuid
@@ -83,6 +84,15 @@ async def _prepare_media(media: list[dict], channel: dict, bot=None) -> list[dic
     prepared = []
     remaining = 64 * 1024 * 1024
     for index, item in enumerate(media):
+        if item.get('data'):
+            data = base64.b64decode(item['data'], validate=True)
+            if len(data) > 256 * 1024:
+                raise ValueError('Сохранённое фото превышает лимит')
+            if channel.get('watermark') and channel.get('logo_path'):
+                data = await asyncio.to_thread(watermark._overlay, data, Path(channel['logo_path']), channel.get('watermark_position', 'bottom-right'))
+            remaining -= len(data)
+            prepared.append({'type': 'photo', 'file': BufferedInputFile(data, f'company{index}.jpg')})
+            continue
         if (item.get('file_id') and item.get('type') == 'photo' and bot
                 and channel.get('watermark') and channel.get('logo_path')):
             try:
@@ -225,14 +235,14 @@ class RecordedBot:
         return send
 
 
-async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None) -> int:
+async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None, approved_media: str = None) -> int:
     # Bound album buffers for API requests as well as background publications.
     async with runtime.delivery_slots:
         with channel_scope(channel):
-            return await _publish_post(bot, post, channel, background=background, approved_by_user=approved_by_user, approved_text=approved_text)
+            return await _publish_post(bot, post, channel, background=background, approved_by_user=approved_by_user, approved_text=approved_text, approved_media=approved_media)
 
 
-async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None) -> int:
+async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None, approved_media: str = None) -> int:
     if not await access.owner_has_access(channel['owner_id']):
         raise PermissionError('доступ владельца закрыт')
     pool = await db.connect()
@@ -270,6 +280,10 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                 raise AlreadyPublished('Бизнес-черновик нельзя отправлять без согласования')
             if (current_channel['business_mode'] or fresh['business_draft']) and fresh['text_out'] != approved_text:
                 raise AlreadyPublished('Текст изменился. Обновите ленту и согласуйте актуальную версию')
+            if current_channel['business_mode'] or fresh['business_draft']:
+                from app.core.business_media import revision
+                if (json.loads(fresh['media'] or '[]') or approved_media is not None) and revision(fresh['media']) != approved_media:
+                    raise AlreadyPublished('Фото изменилось. Обновите ленту и согласуйте текст вместе с фото')
             if news_policy.stale(dict(fresh), channel):
                 raise AlreadyPublished('Новость устарела и больше не доступна для публикации')
             if news_policy.realtime(channel) and not fresh['is_manual'] and await conn.fetchval(
@@ -321,7 +335,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                     post['id'], datetime.now(timezone.utc) + timedelta(seconds=retry_seconds))
         if status != 'failed' or permanent_media_error or post['attempts']+1 >= MAX_ATTEMPTS:
             from app.core.scheduler import alert_admins
-            await alert_admins(bot, 'delivery', 'Есть неудачные или неподтверждённые публикации. Проверьте историю каналов в панели.')
+            with channel_scope(channel):
+                await alert_admins(bot, 'delivery', f'Пост #{post["id"]}: {reason}')
         if status != 'failed':
             raise DeliveryUncertain(reason) from exc
         raise
@@ -334,6 +349,10 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             if attempt_status != 'sending':
                 raise DeliveryUncertain('Попытка уже передана на сверку; автоматическое завершение остановлено')
             await conn.execute("UPDATE posts SET status='published', message_id=$1, published_at=now(), reason=NULL WHERE id=$2", message.message_id, post['id'])
+            # Keep Telegram's copy, not image bytes in the long-lived history.
+            if any(item.get('data') for item in media) and getattr(message, 'photo', None):
+                await conn.execute('UPDATE posts SET media=$1 WHERE id=$2',
+                    json.dumps([{'type':'photo', 'file_id':message.photo[-1].file_id}]), post['id'])
             await conn.execute("UPDATE delivery_attempts SET status='sent', finished_at=now() WHERE id=$1", attempt_id)
             await conn.execute("INSERT INTO stats_daily (channel_id, day, published) VALUES ($1,(now() AT TIME ZONE 'UTC')::date,1) "
                                "ON CONFLICT (channel_id,day) DO UPDATE SET published=stats_daily.published+1", channel['id'])
@@ -398,7 +417,7 @@ async def verify_channel_permissions(bot: Bot, chat_id: int, user_id: int) -> No
 
 async def reject_post(post_id: int) -> bool:
     return bool(await db.update(
-        "UPDATE posts SET status='rejected' WHERE id=? AND status IN ('new','pending','approved','digest','failed')",
+        "UPDATE posts SET status='rejected', media=CASE WHEN business_draft=1 THEN '[]' ELSE media END WHERE id=? AND status IN ('new','pending','approved','digest','failed')",
         (post_id,),
     ))
 

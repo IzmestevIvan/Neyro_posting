@@ -9,7 +9,7 @@ import httpx
 
 from app import db
 from app.ai import gemini
-from app.core import access, runtime
+from app.core import access, runtime, business_media
 from app.core.filters import fingerprint, find_duplicate
 from app.sources import web
 from app.sources.safe_http import UnsafeURL
@@ -37,6 +37,11 @@ content_policy=company_then_topic и не осталось неповторяю�
 Если фактов для запрошенного кейса недостаточно, верни text пустым и в review вопросы.
 Верни также scope: company, topic или questions и basis: краткое объяснение,
 какой конкретный факт о компании лежит в основе поста. Не выдумывай basis.
+Если пост о конкретном проекте на странице reference_url или internet_sources,
+верни media_page: точную ссылку на эту страницу. Иначе media_page: пустая строка.
+Нельзя выбирать другой проект или главную страницу ради фотографии.
+Если reference_projects содержит проекты, верни media_project: ТОЧНОЕ название
+проекта, о котором написан пост, либо пустую строку. Не выбирай похожий проект.
 '''
 
 
@@ -100,6 +105,7 @@ async def draft_text(channel, brief='', article_url='', *, research_out=None):
     if research_out is not None:
         research_out.update(research)
     evidence = ''
+    article = None
     warning = research.get('warning','') + ' '
     url = article_url or profile.get('website', '')
     if url:
@@ -121,7 +127,9 @@ async def draft_text(channel, brief='', article_url='', *, research_out=None):
         "AND business_generated=1 AND text_out IS NOT NULL ORDER BY id DESC LIMIT 12", (channel['id'],))
     prompt = json.dumps({'dossier': profile, 'owner_request': brief,
                          'internet_research': research.get('text',''),
+                         'internet_sources': research.get('sources', []),
                          'reference_url': url, 'unverified_web_reference': evidence,
+                         'reference_projects': [m['project_title'] for m in article.media if m.get('project_title')] if article else [],
                          'recent_topics': [r['text'] for r in recent], 'language': channel['lang']}, ensure_ascii=False)
     result = await gemini.generate_json(prompt, api_key=channel.get('gemini_key') or None,
                                         system=SYSTEM, temperature=0.5)
@@ -138,6 +146,26 @@ async def draft_text(channel, brief='', article_url='', *, research_out=None):
     if scope == 'topic' and (profile['content_policy'] == 'company_only' or brief):
         raise ValueError('Для поста о компании недостаточно новых фактов. Добавьте проект, услугу или новость; тематические посты выключены.')
     warning += ('Материал о компании. ' if scope=='company' else 'Тематический резерв: новых фактов о компании недостаточно. ') + result['basis'][:500] + ' '
+    if research_out is not None:
+        # Only a page actually supplied/read or returned by grounded search.
+        page = article_url or result.get('media_page', '')
+        known = {url} | {s.get('uri') for s in research.get('sources', []) if isinstance(s, dict)}
+        if isinstance(page, str) and page in known and business_media.company_page(page, profile.get('website', '')):
+            try:
+                if page != url or article is None:
+                    async with asyncio.timeout(20), httpx.AsyncClient() as client:
+                        article = await web.fetch_article(client, page)
+                candidates = article.media if business_media.company_page(getattr(article, 'url', page), profile.get('website', '')) else []
+                if any(m.get('project_title') for m in candidates):
+                    candidates = [m for m in candidates if m.get('project_title') == result.get('media_project')]
+                if candidates:
+                    research_out['photo'] = await business_media.download(candidates[0]['url'], page)
+                    research_out['photo']['project_title'] = candidates[0].get('project_title', '')
+                    warning += 'Фото со страницы компании: проверьте соответствие проекту и право публикации. '
+            except (ValueError, httpx.HTTPError, TimeoutError):
+                log.warning('Фото проекта недоступно: канал %s', channel['id'])
+        if not research_out.get('photo'):
+            warning += 'Фото проекта не найдено. Загрузите свою фотографию в карточке поста. '
     return text.strip(), ('Требуется согласование. ' + warning + review)[:1500], url
 
 
@@ -172,6 +200,7 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
                          (db.utcnow() + timedelta(hours=1), channel_id))
         research = {}
         text, review, url = await draft_text(channel, brief, article_url, research_out=research)
+        photo = research.pop('photo', None)
         fp = fingerprint(text)
         known = await db.fetch_all('SELECT id,fingerprint FROM posts WHERE channel_id=? AND fingerprint IS NOT NULL ORDER BY id DESC LIMIT 100', (channel_id,))
         if find_duplicate(fp, [(r['id'], r['fingerprint']) for r in known]):
@@ -183,9 +212,9 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
                 raise ValueError('Досье или режим изменились. Подготовьте черновик заново')
             if automatic and (not fresh['business_auto'] or fresh['paused']):
                 return None
-            post_id = await conn.fetchval("INSERT INTO posts(channel_id,source_title,raw_text,text_out,url,status,reason,is_manual,business_draft,business_generated,fingerprint,fact_check,created_at) "
-                "VALUES($1,'Редактор компании',$2,$3,$4,'pending',$5,1,1,1,$6,$7,now()) RETURNING id",
-                channel_id, brief, text, url, review, fp,json.dumps({'research':research},ensure_ascii=False))
+            post_id = await conn.fetchval("INSERT INTO posts(channel_id,source_title,raw_text,text_out,url,status,reason,is_manual,business_draft,business_generated,fingerprint,fact_check,media,created_at) "
+                "VALUES($1,'Редактор компании',$2,$3,$4,'pending',$5,1,1,1,$6,$7,$8,now()) RETURNING id",
+                channel_id, brief, text, url, review, fp,json.dumps({'research':research},ensure_ascii=False),json.dumps([photo] if photo else []))
             await conn.execute('UPDATE channels SET business_next_at=$1 WHERE id=$2', db.utcnow()+timedelta(days=1), channel_id)
         try:
             await db.bump_stat(channel_id, db.utcnow().date(), 'ai_requests')

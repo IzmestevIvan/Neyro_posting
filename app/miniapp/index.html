@@ -254,7 +254,8 @@
         <button id="saveBusiness" class="accent wide">Сохранить досье</button>
         <label class="row"><span><b>Предлагать пост каждый день</b><i>Не больше 5 черновиков в ожидании. Публикация — только вручную.</i></span><input type="checkbox" data-field="business_auto"></label>
         <label class="label">Новость компании или тема<textarea id="businessBrief" maxlength="4000" rows="3" placeholder="Расскажите, что произошло, или оставьте пустым — редактор предложит полезный материал"></textarea></label>
-        <label class="label">Страница с материалом<input id="businessUrl" maxlength="1000" type="url" placeholder="https://… (необязательно)"></label>
+        <label class="label">Страница проекта компании<input id="businessUrl" maxlength="1000" type="url" placeholder="https://…/projects (необязательно)"></label>
+        <p class="hint">Фото проекта ищем на сайте из досье. Своё фото можно загрузить в готовый черновик во вкладке «Посты». Проверьте изображение и право публикации перед согласованием.</p>
         <p class="hint">Источники Telegram/RSS не нужны. Редактор ищет компанию на сайте и в публичных соцсетях; ссылки покажет рядом с черновиком. Для точного поиска укажите сайт или соцсеть в досье. При недоступности поиска используются ваши данные с предупреждением.</p>
         <button id="generateBusiness" class="accent wide">Подготовить на согласование</button>
         <p id="businessStatus" class="hint" role="status">Готовые черновики появятся во вкладке «Посты».</p>
@@ -370,7 +371,7 @@
       <summary><span>Ключ Gemini</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
         <p class="hint">Сначала используется ваш ключ. Если он недоступен или исчерпал квоту, запрос перейдёт на ключ сервиса. Пусто — всегда используется ключ сервиса. Лимиты публикаций тарифа сохраняются.</p>
-        <input type="password" data-field="gemini_key" placeholder="AIza…">
+        <input type="password" data-field="gemini_key" placeholder="Ключ Google AI Studio: AQ.… или AIza…">
         <button class="accent wide" data-save="gemini_key">Сохранить ключ</button>
       </div>
     </details>
@@ -401,6 +402,8 @@
     <div id="system" class="card system"></div>
     <h3 class="section">Нагрузка и очередь · все каналы</h3>
     <div id="adminMonitoring" class="grid"></div>
+    <h3 class="section">Нагрузка Gemini API</h3>
+    <div id="apiLoad" class="card"><p class="hint">Загрузка показателей API…</p></div>
     <details class="card group"><summary>Проверка всех каналов</summary><div id="channelAudit" class="body"></div></details>
     <p class="hint">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</p>
 
@@ -411,7 +414,7 @@
     <div class="card admin-key-form">
       <p class="hint">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</p>
       <label for="apiKeyInput" class="label">Новые ключи</label>
-      <textarea id="apiKeyInput" rows="3" autocomplete="off" spellcheck="false" placeholder="Вставьте ключи Gemini"></textarea>
+      <textarea id="apiKeyInput" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="AQ.… или AIza… — каждый ключ с новой строки"></textarea>
       <div class="form-actions">
       <button id="apiKeyAdd" class="accent wide">Сохранить ключи</button>
       <button id="apiKeyRefresh" class="ghost wide">Обновить статусы</button>
@@ -426,6 +429,14 @@
         <input type="number" id="promoCount" value="5" min="1" max="50" class="num wide-num" title="сколько кодов">
       </div>
       <input type="text" id="promoNote" placeholder="комментарий: кому и за что (необязательно)">
+      <div class="access-grid">
+        <label>Постов в день<input id="promoDaily" type="number" min="0" max="100000" value="500"></label>
+        <label>Каналов<input id="promoChannels" type="number" min="1" max="120" value="3"></label>
+        <label>Дней доступа<input id="promoDays" type="number" min="1" max="3650" value="30"></label>
+        <label>Активировать за дней<input id="promoExpiry" type="number" min="1" max="3650" placeholder="Без срока"></label>
+      </div>
+      <label>Telegram ID клиента (необязательно)<input id="promoRecipient" type="text" inputmode="numeric" placeholder="Любой клиент"></label>
+      <p class="hint">Ключ одноразовый. Дни доступа прибавляются при активации. Срок активации отсчитывается от выпуска.</p>
       <button id="promoCreate" class="accent wide">Выпустить коды</button>
     </div>
     <div id="promoList"></div>

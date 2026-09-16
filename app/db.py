@@ -11,6 +11,21 @@ from app.config import DATABASE_URL, DEFAULT_DAILY_LIMIT
 log = logging.getLogger("db")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id TEXT PRIMARY KEY,
+  admin_id BIGINT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS broadcast_recipients (
+  broadcast_id TEXT NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  message_id BIGINT,
+  error TEXT,
+  PRIMARY KEY(broadcast_id,user_id)
+);
 CREATE TABLE IF NOT EXISTS support_routes (
   admin_id BIGINT NOT NULL,
   message_id BIGINT NOT NULL,
@@ -200,6 +215,10 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ('channels', 'business_profile', "TEXT NOT NULL DEFAULT '{}'"),
     ('channels', 'business_next_at', 'TIMESTAMPTZ'),
     ('posts', 'business_draft', 'INTEGER NOT NULL DEFAULT 0'),
+    ('posts', 'popularity_threshold', 'INTEGER'),
+    ('users', 'plan', "TEXT NOT NULL DEFAULT 'custom'"),
+    ('promo_codes', 'expires_at', 'TIMESTAMPTZ'),
+    ('promo_codes', 'assigned_to', 'BIGINT'),
     ('posts', 'business_generated', 'INTEGER NOT NULL DEFAULT 0'),
     ('channels', 'watermark_position', "TEXT NOT NULL DEFAULT 'bottom-right'"),
     ("users", "max_channels", "INTEGER NOT NULL DEFAULT 1"),

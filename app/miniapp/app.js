@@ -3,6 +3,7 @@ const params = new URLSearchParams(location.search);
 const initData = tg?.initData || (params.get('dev') ? `dev:${params.get('dev')}` : '');
 
 const QUALITY = ['fast', 'balanced', 'super'];
+const ACCESS_PLANS = {start:{name:'Старт',daily:100,channels:1,days:30},pro:{name:'Про',daily:500,channels:3,days:30},unlim:{name:'Расширенный',daily:2000,channels:10,days:365},custom:{name:'Индивидуальный',daily:100,channels:1,days:30}};
 const QUALITY_TITLE = { fast: 'Быстро', balanced: 'Баланс', super: 'Суперпостинг' };
 const QUALITY_HINT = {
   fast: 'Один запрос: лёгкий рерайт без проверок. Самый дешёвый режим.',
@@ -43,6 +44,7 @@ function researchCard(research) {
 }
 
 function toast(message, isError = false) {
+  document.querySelectorAll('.toast').forEach(el => el.remove());
   const el = document.createElement('div');
   el.className = `toast${isError ? ' err' : ''}`;
   el.textContent = message;
@@ -199,19 +201,21 @@ async function loadFeed() {
   }
   $('#feed').innerHTML = (posts.length === 30 ? '<p class="hint">Показаны последние 30 постов. После обработки появятся остальные.</p>' : '') + posts
     .map((post) => {
-      const photo = post.media.find((m) => m.type === 'photo' && (m.url || '').startsWith('http'));
+      const photo = post.media.find((m) => m.type === 'photo' && (m.data || (m.url || '').startsWith('http')));
+      const photoUrl = photo?.data ? `data:image/jpeg;base64,${photo.data}` : photo?.url;
       const attached = !photo && post.media.length
         ? `<p class="note">${icon('clip')}<span>${post.media.length} медиа из чата — прикрепится при публикации</span></p>` : '';
       const warn = post.fact_check && post.fact_check.ok === false
         ? `<p class="note warn">${icon('alert')}<span>Фактчек: ${esc(post.fact_check.verdict || 'есть замечания')}</span></p>` : `<p class="note ${post.fact_check?.ok === true ? 'ok' : ''}">${icon('shield')}<span>${post.fact_check?.ok === true ? 'Проверка пройдена · сверьте важные факты с оригиналом' : 'Без финального фактчека · проверьте текст перед публикацией'}</span></p>`;
-      return `<article class="post" data-id="${post.id}">
+      return `<article class="post" data-id="${post.id}" data-media-revision="${esc(post.media_revision || '')}">
         <header>
           <span>${esc(post.source_title || 'источник')} · ${ago(post.created_at) || ''}</span>
           ${post.url ? `<a href="${esc(safeLink(post.url))}" target="_blank" rel="noopener noreferrer">${icon('link')}оригинал</a>` : ''}
         </header>
-        ${photo ? `<img src="${esc(photo.url)}" loading="lazy" alt="">` : ''}
+        ${photo ? `<img src="${esc(photoUrl)}" loading="lazy" alt="Фото к посту — проверьте перед согласованием">` : ''}
         ${attached}${warn}${post.reason ? `<p class="note warn">${esc(post.reason)}</p>` : ''}
         <div class="text">${esc(post.text_out || post.raw_text)}</div>
+        ${post.business_draft ? `<div class="business-photo"><label class="upload-control"><span>${photo ? 'Заменить фото' : 'Загрузить фото проекта'}</span><small>JPEG, PNG или WebP · до 4 МБ</small><input type="file" class="post-photo" accept="image/jpeg,image/png,image/webp"></label><p class="hint">Только свои фото или изображения с разрешением на публикацию.</p>${photo?.source ? `<a href="${esc(safeLink(photo.source))}" target="_blank" rel="noopener noreferrer">Страница фотографии · проверьте проект</a>` : ''}${post.media.length ? '<button data-act="remove_photo">Убрать фото</button>' : '<p class="note warn">Фото не найдено — загрузите его перед согласованием.</p>'}</div>` : ''}
         <div class="acts">
           <button class="ok" data-act="approve" ${post.text_out?.trim() ? '' : 'disabled title="Нет готового текста"'}>${icon('check')} ${post.business_draft ? 'Согласовать и опубликовать' : 'Опубликовать'}</button>
           <button data-act="${post.business_draft ? 'edit' : 'regen'}">${icon('refresh')} ${post.business_draft ? 'Править' : 'Переписать'}</button>
@@ -222,6 +226,21 @@ async function loadFeed() {
     })
     .join('');
 }
+
+$('#feed').addEventListener('change', async (event) => {
+  if (!event.target.matches('.post-photo')) return;
+  const file = event.target.files[0];
+  if (!file) return;
+  const article = event.target.closest('.post');
+  if (file.size > 4 * 1024 * 1024) { toast('Фото: максимум 4 МБ', true); event.target.value = ''; return; }
+  article.querySelectorAll('button,input').forEach(el => el.disabled = true);
+  try {
+    await api(`/posts/${article.dataset.id}/photo`, {method:'POST', headers:{'Content-Type':file.type, 'X-Media-Revision':article.dataset.mediaRevision}, body:file});
+    await loadFeed();
+    toast('Фото сохранено. Проверьте его вместе с текстом.');
+  } catch (error) { toast(error.message, true); }
+  finally { article.querySelectorAll('button,input').forEach(el => el.disabled = false); }
+});
 
 $('#feed').addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-act]');
@@ -248,10 +267,11 @@ $('#feed').addEventListener('click', async (event) => {
   $$('.post .acts button').forEach((b) => (b.disabled = true));
   try {
     const result = await api(`/posts/${id}/${action === 'save-edit' ? 'edit' : action}`, { method: 'POST',
+      headers: {'X-Media-Revision':article.dataset.mediaRevision},
       ...(action === 'save-edit' ? {body: JSON.stringify({text:article.querySelector('.business-edit textarea').value})}
-        : action === 'approve' ? {body:JSON.stringify({text:article.querySelector('.text').textContent})} : {}) });
+        : action === 'approve' ? {body:JSON.stringify({text:article.querySelector('.text').textContent, media_revision:article.dataset.mediaRevision || undefined})} : {}) });
     tg?.HapticFeedback?.notificationOccurred('success');
-    if (action === 'regen' || action === 'save-edit') {
+    if (action === 'regen' || action === 'save-edit' || action === 'remove_photo') {
       await loadFeed();
       toast('Черновик сохранён. Для публикации подтвердите его.');
     } else {
@@ -696,6 +716,21 @@ $('#logoUpload').addEventListener('change', async (event) => {
 
 /* ---------- admin ---------- */
 
+function renderApiLoad(load) {
+  const target = $('#apiLoad');
+  if (!load) { target.innerHTML = '<p class="hint">Показатели API пока недоступны.</p>'; return; }
+  const recent = load.windows['15'], hour = load.windows['60'];
+  const peak = Math.max(1, ...load.series.map(s => s.requests));
+  const n = value => Number(value) || 0;
+  target.innerHTML = `<b>Сейчас: ${n(load.active)} из ${n(load.concurrency)} запросов · ждут слот: ${n(load.waiting)}</b>
+    <progress class="api-capacity" max="${Math.max(1,n(load.concurrency))}" value="${n(load.active)}" aria-label="Занятые слоты Gemini"></progress>
+    <p class="hint">Запросы по минутам · последние 15 минут. Красная часть — ошибки HTTP, сети и прерывания.</p>
+    <div class="api-chart" role="img" aria-label="За последние 15 минут: ${n(recent.requests)} запросов, ${n(recent.errors)} ошибок">${load.series.map((s,i) => `<div class="api-bar" title="${14-i} мин. назад: ${n(s.requests)} запросов, ${n(s.errors)} ошибок" style="height:${Math.max(2,100*n(s.requests)/peak)}%"><span style="height:${s.requests ? 100*n(s.errors)/s.requests : 0}%"></span></div>`).join('')}</div>
+    <div class="grid">${[[recent.requests,'HTTP-попыток / 15 мин'],[recent.errors,'ошибок / 15 мин'],[recent.quota,'отказов квоты 429'],[recent.server,'ошибок сервера 5xx'],[recent.transport,'сетевых ошибок'],[recent.interrupted,'прерванных запросов'],[recent.fallbacks,'успешных резервов'],[recent.average_ms == null ? '—' : (recent.average_ms/1000).toFixed(1)+' с','средний HTTP-ответ']].map(([v,label]) => `<div class="stat"><b>${esc(String(v))}</b><i>${label}</i></div>`).join('')}</div>
+    <p class="hint">За 60 минут: ${n(hour.requests)} попыток, ${n(hour.errors)} ошибок, ${n(hour.fallbacks)} успешных резервов.</p>
+    <p class="hint">Учёт с ${esc(new Date(load.started_at).toLocaleString('ru-RU'))}, обнуляется при перезапуске. Это HTTP-нагрузка, не число постов и не процент квоты Google. Ожидание слота не включает ожидание ключа или отложенные материалы; HTTP 200 не гарантирует прохождение фактчека.</p>`;
+}
+
 async function refreshAdminMonitoring() {
   if (!adminOpen || monitoringBusy || document.hidden) return;
   monitoringBusy = true;
@@ -703,6 +738,7 @@ async function refreshAdminMonitoring() {
     const data = await api('/admin/monitoring');
     if (!adminOpen) return;
     renderSystem(data.system);
+    renderApiLoad(data.api_load);
     $('#adminEvents').innerHTML = (data.events || []).map(e => `<div class="card"><b>${e.emergency ? '🚨 ' : ''}${esc(e.title)}</b><p>${esc(e.explanation)}</p><p class="hint">${esc(e.channel?.title || 'Сервис')} · ${esc(new Date(e.time).toLocaleString('ru-RU'))}</p><details><summary>Технические детали</summary><p class="hint">${esc(e.detail)}</p></details></div>`).join('') || '<p class="hint">Событий пока нет.</p>';
     const c = data.capacity, q = data.queue;
     $('#adminMonitoring').innerHTML = [
@@ -733,10 +769,17 @@ async function loadAdmin() {
   ].map(([cls, v, l]) => `<div class="stat ${cls}"><b>${v ?? 0}</b><i>${l}</i></div>`).join('');
 
   $('#adminUsers').innerHTML = data.users.map((u) => `
-    <div class="adminrow">
+    <div class="adminrow client-access" data-client="${u.tg_id}">
       <span>${esc(u.first_name || u.tg_id)}${u.username ? ` @${esc(u.username)}` : ''}
         <div class="sub">id ${u.tg_id} · каналов ${u.channels}${u.promo_code ? ' · ' + esc(u.promo_code) : ''}</div></span>
-      <label class="admin-limit"><span>Постов/день</span><input type="number" min="0" max="100000" value="${u.daily_limit}" data-user="${u.tg_id}" title="лимит постов в день"></label>
+      <div class="access-grid">
+      <label>Тариф<select data-field="plan">${Object.entries(ACCESS_PLANS).map(([key,p]) => `<option value="${key}" ${key===(u.plan||'custom')?'selected':''}>${p.name}</option>`).join('')}</select></label>
+      <label>Постов/день<input type="number" min="0" max="100000" value="${u.daily_limit}" data-field="daily_limit"></label>
+      <label>Лимит каналов<input type="number" min="1" max="120" value="${u.max_channels}" data-field="max_channels"></label>
+      <label>Продлить на дней<input type="number" min="0" max="3650" value="0" data-field="extend_days"></label>
+      </div>
+      <p class="hint">Доступ до ${formatDate(u.access_until)}. Смена тарифа сама по себе не продлевает доступ и не удаляет каналы.</p>
+      <button class="accent wide" data-save-client>Сохранить изменения</button>
     </div>`).join('') || '<p class="empty-note">Пользователей пока нет.</p>';
 
   $('#adminChannels').innerHTML = data.channels.map((c) => `
@@ -746,15 +789,32 @@ async function loadAdmin() {
       <span class="tag${c.paused ? '' : ' live'}">${c.paused ? 'пауза' : c.autopost ? 'авто' : 'модерация'}</span>
     </div>`).join('') || '<p class="empty-note">Каналов пока нет.</p>';
 
-  $('#adminUsers').querySelectorAll('input[data-user]').forEach((input) => {
-    input.addEventListener('change', async () => {
+  $('#adminUsers').querySelectorAll('[data-client]').forEach((row) => {
+    row.querySelector('[data-field="plan"]').addEventListener('change', event => {
+      const p = ACCESS_PLANS[event.target.value];
+      if (event.target.value !== 'custom') {
+        row.querySelector('[data-field="daily_limit"]').value=p.daily;
+        row.querySelector('[data-field="max_channels"]').value=p.channels;
+      }
+    });
+    row.querySelector('[data-save-client]').addEventListener('click', async (event) => {
+      const button=event.currentTarget;
+      const inputs=[...row.querySelectorAll('[data-field]')];
+      if (!inputs.every(input=>input.reportValidity())) return;
+      const payload=Object.fromEntries(inputs.map(input=>[input.dataset.field,input.dataset.field==='plan'?input.value:Number(input.value)]));
+      if (!(await ask('Сохранить тариф и лимиты клиента? Продление прибавится к текущему сроку.'))) return;
+      button.disabled=true;
       try {
-        await api(`/admin/users/${input.dataset.user}`, {
-          method: 'POST', body: JSON.stringify({ daily_limit: Number(input.value) }),
+        await api(`/admin/users/${row.dataset.client}`, {
+          method: 'POST', body: JSON.stringify(payload),
         });
-        toast('Лимит обновлён');
+        row.querySelector('[data-field="extend_days"]').value=0;
+        toast('Доступ клиента обновлён');
+        await loadAdmin();
       } catch (error) {
         toast(error.message, true);
+      } finally {
+        button.disabled=false;
       }
     });
   });
@@ -800,7 +860,7 @@ async function loadPromoCodes() {
     <div class="adminrow">
       <span class="codechip${c.used_by ? ' used' : ''}">${esc(c.code)}
         <div class="sub">${esc(c.plan)} · ${c.daily_limit}/день · ${c.max_channels} кан. · ${c.days} дн.${
-          c.used_by ? ` · активировал ${esc(c.first_name || c.used_by)}` : ''}${c.note ? ' · ' + esc(c.note) : ''}</div></span>
+          c.used_by ? ` · активировал ${esc(c.first_name || c.used_by)}` : ''}${c.assigned_to ? ' · для ID '+esc(c.assigned_to) : ''}${c.expires_at ? ' · активация до '+formatDate(c.expires_at) : ''}${c.note ? ' · ' + esc(c.note) : ''}</div></span>
       ${c.used_by ? '<span class="tag">занят</span>'
         : `<span class="pair"><button class="ghost square" data-copy="${esc(c.code)}">${icon('copy')}</button>
            <button class="ghost square" data-drop="${esc(c.code)}">${icon('trash')}</button></span>`}
@@ -830,6 +890,7 @@ $('#promoList').addEventListener('click', async (event) => {
 });
 
 $('#promoCreate').addEventListener('click', async () => {
+  if (!['promoCount','promoDaily','promoChannels','promoDays','promoExpiry'].every(id=>$('#'+id).reportValidity())) return;
   $('#promoCreate').disabled = true;
   try {
     const result = await api('/admin/promo', {
@@ -838,6 +899,9 @@ $('#promoCreate').addEventListener('click', async () => {
         count: Number($('#promoCount').value) || 1,
         plan: $('#promoPlan').value,
         note: $('#promoNote').value,
+        overrides: {daily_limit:Number($('#promoDaily').value),max_channels:Number($('#promoChannels').value),days:Number($('#promoDays').value)},
+        activation_days: $('#promoExpiry').value ? Number($('#promoExpiry').value) : null,
+        assigned_to: $('#promoRecipient').value.trim() ? Number($('#promoRecipient').value) : null,
       }),
     });
     $('#promoNote').value = '';
@@ -848,6 +912,13 @@ $('#promoCreate').addEventListener('click', async () => {
   } finally {
     $('#promoCreate').disabled = false;
   }
+});
+$('#promoPlan').addEventListener('change', event => {
+  const p=ACCESS_PLANS[event.target.value];
+  if (event.target.value==='custom') return;
+  $('#promoDaily').value=p.daily;
+  $('#promoChannels').value=p.channels;
+  $('#promoDays').value=p.days;
 });
 
 $('#openAdmin').addEventListener('click', () => {
@@ -1137,7 +1208,8 @@ async function start() {
     const value = `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`;
     return [value, value];
   }));
-  fillOptions($('#promoPlan'), [['start', 'Старт'], ['pro', 'Про'], ['unlim', 'Безлимит']]);
+  fillOptions($('#promoPlan'), Object.entries(ACCESS_PLANS).map(([k,p])=>[k,p.name]));
+  $('#promoPlan').value='pro';
 
   $('#boot').hidden = true;
   $('#app').hidden = false;

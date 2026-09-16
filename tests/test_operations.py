@@ -85,6 +85,42 @@ def test_redaction_and_bounded_rotation(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ai_retries_never_escalate_just_by_count(tmp_path):
+    journal=ErrorJournal(tmp_path/'errors.log', admins={1})
+    bot=AsyncMock()
+    try:
+        for _ in range(30):
+            journal.handle(logging.LogRecord('operations.ai',logging.ERROR,__file__,1,'триаж недоступен',(),None))
+        await journal.flush_alerts(bot)
+        bot.send_message.assert_not_awaited()
+        assert (tmp_path/'errors.log').read_text().count('триаж недоступен')==30
+    finally:
+        journal.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['failed','partial','uncertain','published','expired'])
+async def test_delivery_alert_rechecks_current_state(tmp_path,monkeypatch,status):
+    from app import db
+    monkeypatch.setattr(db,'fetch_one',AsyncMock(return_value={'status':status}))
+    journal=ErrorJournal(tmp_path/'errors.log',admins={1})
+    bot=AsyncMock()
+    try:
+        with channel_scope({'id':1,'title':'Канал','owner_id':1}):
+            journal.handle(logging.LogRecord('operations.delivery',logging.ERROR,__file__,1,'Пост #42: ошибка',(),None))
+        await journal.flush_alerts(bot)
+        if status in ('published','expired'):
+            bot.send_message.assert_not_awaited()
+            assert not journal.pending
+        else:
+            body=bot.send_message.call_args.args[1]
+            assert '#42' in body and 'требуется вмешательство' not in body
+            assert ('Не отправлен' if status=='failed' else 'часть' if status=='partial' else 'неизвестен') in body
+    finally:
+        journal.close()
+
+
+@pytest.mark.asyncio
 async def test_alert_names_channel_and_does_not_hide_different_provider_errors(tmp_path):
     journal = ErrorJournal(tmp_path/'errors.log', admins={1})
     bot = AsyncMock()

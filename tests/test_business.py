@@ -243,7 +243,7 @@ async def test_auto_uses_daily_interval_and_pause(store,channel,monkeypatch):
 @pytest.mark.asyncio
 async def test_web_reference_is_data_not_claimed_factcheck(store,channel,monkeypatch):
     current = await enable(store,channel)
-    article = AsyncMock(return_value=SimpleNamespace(text='Материал официальной страницы'))
+    article = AsyncMock(return_value=SimpleNamespace(text='Материал официальной страницы', media=[]))
     monkeypatch.setattr(business.web,'fetch_article',article)
     ai = AsyncMock(return_value={'scope':'company','basis':'Услуги из досье','text':TEXT,'review':'Проверьте факты страницы'})
     monkeypatch.setattr(gemini,'generate_json',ai)

@@ -81,6 +81,27 @@ def test_empty_source_is_safe():
     assert _pick_new([], "c/1") == []
 
 
+def test_popularity_never_compares_new_post_to_old_hits():
+    from datetime import timedelta
+    from app.core.scheduler import popularity_threshold
+    now = at(12)
+    fresh = SimpleNamespace(uid='new', views=1000, date=(now-timedelta(minutes=2)).isoformat())
+    old = [SimpleNamespace(uid=str(i), views=150000, date=(now-timedelta(hours=i+1)).isoformat()) for i in range(5)]
+    assert popularity_threshold(fresh, old+[fresh], now) is None
+
+
+def test_popularity_requires_three_similarly_aged_peers():
+    from datetime import timedelta
+    from app.core.scheduler import popularity_threshold
+    now = at(12)
+    fresh = SimpleNamespace(uid='new', views=10, date=(now-timedelta(minutes=10)).isoformat())
+    peers = [SimpleNamespace(uid=str(i), views=v, date=(now-timedelta(minutes=8+i)).isoformat()) for i,v in enumerate([100,200,300])]
+    assert popularity_threshold(fresh, peers+[fresh], now) == 200
+    assert popularity_threshold(fresh, peers[:2]+[fresh], now) is None
+    fresh.date = None
+    assert popularity_threshold(fresh, peers, now) is None
+
+
 def test_source_items_are_normalized_to_chronological_order():
     first = SimpleNamespace(uid="first", date="2026-09-07T10:00:00+00:00")
     last = SimpleNamespace(uid="last", date="2026-09-07T12:00:00+00:00")

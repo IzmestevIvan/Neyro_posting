@@ -11,6 +11,7 @@ import httpx
 
 from app import db
 from app.ai import key_pool
+from app.ai.metrics import metrics
 from app.core import runtime
 from app.core.runtime import ai_slots
 from app.config import (
@@ -103,13 +104,32 @@ async def _call(
     if as_json and not search:
         body["generationConfig"]["responseMimeType"] = "application/json"
 
-    async with ai_slots:
-        resp = await client.post(
-            API.format(model=model),
-            headers={"x-goog-api-key": api_key},
-            json=body,
-            timeout=60,
-        )
+    metrics.waiting += 1
+    acquired = False
+    try:
+        async with ai_slots:
+            acquired = True
+            metrics.waiting -= 1
+            metrics.active += 1
+            started = time.monotonic()
+            status = 'interrupted'
+            try:
+                resp = await client.post(
+                    API.format(model=model),
+                    headers={"x-goog-api-key": api_key},
+                    json=body,
+                    timeout=60,
+                )
+                status = resp.status_code
+            except (httpx.RequestError, TimeoutError):
+                status = 'transport'
+                raise
+            finally:
+                metrics.active -= 1
+                metrics.record(status, time.monotonic() - started)
+    finally:
+        if not acquired:
+            metrics.waiting -= 1
     if resp.status_code != 200:
         raise AIError(f"{model}: HTTP {resp.status_code}")
 
@@ -194,6 +214,7 @@ async def generate(
                         if key_id is not None:
                             await key_pool.succeeded(key_id)
                         if errors:
+                            metrics.fallback()
                             log.warning('Обработка продолжена: резервный маршрут ИИ успешно ответил. Модель: %s; маршрут: %s', name, route['label'])
                         return result
                     except (AIError, httpx.RequestError, TimeoutError) as exc:

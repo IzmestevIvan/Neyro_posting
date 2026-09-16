@@ -1,4 +1,6 @@
 import httpx
+import json
+from urllib.parse import urljoin
 from selectolax.parser import HTMLParser
 
 from app.sources.telegram_web import RawItem
@@ -28,20 +30,43 @@ async def fetch_article(client: httpx.AsyncClient, url: str) -> RawItem:
     resp.raise_for_status()
     tree = HTMLParser(resp.text)
 
+    # Inertia exposes the same public project cards the browser renders. Read
+    # only this known collection, never auth props or executable scripts.
+    projects = []
+    node = tree.css_first('[data-page]')
+    if node:
+        try:
+            props = json.loads(node.attributes['data-page']).get('props', {})
+            entries = props.get('projects', [])
+            if isinstance(entries, list):
+                for entry in entries[:60]:
+                    if not isinstance(entry, dict) or not isinstance(entry.get('title'), str):
+                        continue
+                    title = entry['title'][:300]
+                    description = HTMLParser(str(entry.get('description') or '')).text()[:1500]
+                    images = entry.get('images', [])
+                    image = next((i['src'] for i in images if isinstance(i, dict) and isinstance(i.get('src'), str)), '') if isinstance(images, list) else ''
+                    projects.append({'title': title, 'description': description, 'image': urljoin(str(resp.url), image) if image else ''})
+        except (ValueError, TypeError, AttributeError):
+            pass
+
     title = _meta(tree, "og:title") or (tree.css_first("title").text(strip=True) if tree.css_first("title") else "")
     description = _meta(tree, "og:description")
     body = _body_text(tree)
+    if projects:
+        body = '\n\n'.join(p['title'] + ': ' + p['description'] for p in projects)
     text = "\n\n".join(part for part in (title, description, body) if part).strip()
     if len(text) < 40:
         raise ValueError("не удалось извлечь текст со страницы")
 
-    image = _meta(tree, "og:image")
+    image = urljoin(str(resp.url), _meta(tree, "og:image")) if _meta(tree, "og:image") else ''
     site = _meta(tree, "og:site_name") or httpx.URL(url).host
 
     return RawItem(
         uid=url,
-        url=url,
+        url=str(resp.url),
         text=text[:8000],
-        media=[{"type": "photo", "url": image}] if image.startswith("http") else [],
+        media=([{'type':'photo', 'url':p['image'], 'project_title':p['title']} for p in projects if p['image'].startswith('http')]
+               if projects else [{"type": "photo", "url": image}] if image.startswith("http") else []),
         source_title=site,
     )

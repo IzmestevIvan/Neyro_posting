@@ -13,11 +13,18 @@ PLANS = {
     "start": {"daily_limit": 100, "max_channels": 1, "days": 30},
     "pro": {"daily_limit": 500, "max_channels": 3, "days": 30},
     "unlim": {"daily_limit": 2000, "max_channels": 10, "days": 365},
+    "custom": {"daily_limit": 100, "max_channels": 1, "days": 30},
 }
 
 
 class PromoError(RuntimeError):
     pass
+
+
+def integer(value, low, high, label):
+    if type(value) is not int or not low <= value <= high:
+        raise PromoError(f'{label}: целое число от {low} до {high}')
+    return value
 
 
 def generate_code() -> str:
@@ -39,17 +46,32 @@ async def create_codes(
     plan: str = "pro",
     note: Optional[str] = None,
     overrides: Optional[dict] = None,
+    activation_days: Optional[int] = None,
+    assigned_to: Optional[int] = None,
 ) -> list[str]:
     if plan not in PLANS:
         raise PromoError(f"неизвестный тариф: {plan}")
+    integer(count, 1, 100, 'Количество кодов')
+    if overrides is not None and (not isinstance(overrides, dict) or set(overrides)-{'daily_limit','max_channels','days'}):
+        raise PromoError('Неизвестные настройки кода')
     settings = {**PLANS[plan], **(overrides or {})}
+    integer(settings['daily_limit'], 0, 100000, 'Постов в день')
+    integer(settings['max_channels'], 1, 120, 'Каналов')
+    integer(settings['days'], 1, 3650, 'Дней доступа')
+    if settings != PLANS[plan]:
+        plan = 'custom'
+    if note is not None and (not isinstance(note, str) or len(note)>500):
+        raise PromoError('Комментарий: до 500 символов')
+    expires = None if activation_days is None else db.utcnow()+timedelta(days=integer(activation_days,1,3650,'Срок активации'))
+    if assigned_to is not None:
+        integer(assigned_to, 1, 2**63-1, 'Telegram ID')
 
     codes = []
     for _ in range(max(1, min(count, 100))):
         code = generate_code()
         await db.execute(
-            "INSERT INTO promo_codes (code, plan, daily_limit, max_channels, days, note, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO promo_codes (code, plan, daily_limit, max_channels, days, note, created_at, expires_at, assigned_to) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 code,
                 plan,
@@ -58,6 +80,7 @@ async def create_codes(
                 settings["days"],
                 note,
                 db.utcnow(),
+                expires, assigned_to,
             ),
         )
         codes.append(code)
@@ -96,11 +119,15 @@ async def redeem(code: str, tg_id: int) -> dict:
                     "already_redeemed": True,
                 }
             now = db.utcnow()
+            if row['expires_at'] and row['expires_at'] <= now:
+                raise PromoError('Срок активации кода истёк')
+            if row['assigned_to'] is not None and row['assigned_to'] != tg_id:
+                raise PromoError('Код предназначен другому клиенту')
             current = user["access_until"]
             until = max(current, now) + timedelta(days=row["days"]) if current else now + timedelta(days=row["days"])
             await conn.execute(
-                "UPDATE users SET daily_limit=$1, max_channels=$2, access_until=$3, promo_code=$4 WHERE tg_id=$5",
-                row["daily_limit"], row["max_channels"], until, formatted_code, tg_id,
+                "UPDATE users SET daily_limit=$1, max_channels=$2, access_until=$3, promo_code=$4, plan=$6 WHERE tg_id=$5",
+                row["daily_limit"], row["max_channels"], until, formatted_code, tg_id, row['plan'],
             )
             await conn.execute(
                 "UPDATE promo_codes SET used_by=$1, used_at=$2 WHERE code=$3",

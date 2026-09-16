@@ -11,6 +11,7 @@ from app import db
 from app.ai import gemini
 from app.api.server import create_app
 from app.bot.handlers import router as bot_router
+from app.bot import broadcasts
 from app.config import BOT_TOKEN, HOST, PORT, DEV_AUTH
 from app.core import scheduler, operations
 from app.config import ROOT
@@ -45,6 +46,7 @@ async def run_service(bot, reporter) -> None:
             await asyncio.sleep(10)
 
     dispatcher = Dispatcher()
+    dispatcher.include_router(broadcasts.router)
     dispatcher.include_router(bot_router)
 
     me = await bot.get_me()
@@ -58,7 +60,7 @@ async def run_service(bot, reporter) -> None:
 
     model_check = asyncio.create_task(report_models())
 
-    tasks = [*scheduler.start(bot), asyncio.create_task(check_guard()), reporter]
+    tasks = [*scheduler.start(bot), asyncio.create_task(check_guard()), asyncio.create_task(broadcasts.run(bot)), reporter]
     application = create_app(bot, me.username)
     application.state.background_tasks = tasks
     server = uvicorn.Server(

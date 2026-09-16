@@ -5,7 +5,8 @@ from time import monotonic
 from weakref import WeakValueDictionary
 
 _locks = WeakValueDictionary()
-ai_slots = asyncio.Semaphore(4)
+AI_CONCURRENCY = 4
+ai_slots = asyncio.Semaphore(AI_CONCURRENCY)
 source_slots = asyncio.Semaphore(8)
 delivery_slots = asyncio.Semaphore(2)
 fresh_slots = asyncio.Semaphore(2)

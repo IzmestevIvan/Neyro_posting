@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import secrets
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -17,6 +18,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
     WebAppInfo,
+    FSInputFile,
 )
 
 from app import db
@@ -37,7 +39,7 @@ class AccessMiddleware(BaseMiddleware):
             return
         text = (getattr(event, "text", None) or "").split()
         command = text[0].split("@", 1)[0] if text else ""
-        if isinstance(event, Message) and command in ("/start", "/id", "/help"):
+        if (isinstance(event, Message) and command in ("/start", "/id", "/help")) or (isinstance(event, CallbackQuery) and event.data in ('menu:about', 'menu:help')):
             return await handler(event, data)
         user = getattr(event, "from_user", None)
         if not user or not await access.owner_has_access(user.id):
@@ -94,6 +96,60 @@ def miniapp_markup() -> Optional[InlineKeyboardMarkup]:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    user = await ensure_user(message)
+    if (message.text or '').split(maxsplit=1)[-1] == 'add_source':
+        return await cmd_overview(message)
+    keyboard = await welcome_markup(user)
+    text = ('<b>Нейропостинг — ваша редакция в Telegram</b>\n\n'
+            'Готовьте посты, ведите каналы по расписанию и согласовывайте материалы компании в одном приложении.\n\n'
+            'Новости и черновики остаются в приложении. Здесь — ваши материалы, помощь и важные сообщения сервиса.\n\n')
+    text += ('Откройте приложение, чтобы продолжить.' if has_access(user) else
+             'Для начала откройте приложение и активируйте промокод. Нет кода? Напишите в поддержку.')
+    try:
+        await message.answer_photo(FSInputFile(Path(__file__).parent / 'assets/welcome.png'), caption=text, parse_mode='HTML', reply_markup=keyboard)
+    except Exception:
+        log.warning('Не удалось отправить приветственную картинку', exc_info=True)
+        await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+
+
+async def welcome_markup(user):
+    rows = []
+    if PUBLIC_URL.startswith('https://'):
+        rows.append([InlineKeyboardButton(text='Открыть приложение', web_app=WebAppInfo(url=PUBLIC_URL))])
+    rows.append([InlineKeyboardButton(text='О продукте', callback_data='menu:about'),
+                 InlineKeyboardButton(text='Как начать', callback_data='menu:help')])
+    support = await db.get_kv('support_username')
+    if isinstance(support, str) and re.fullmatch(r'[A-Za-z0-9_]{5,32}', support.lstrip('@')):
+        rows.append([InlineKeyboardButton(text='Поддержка', url='https://t.me/' + support.lstrip('@'))])
+    if user.get('is_admin') or user['tg_id'] in ADMIN_IDS:
+        rows.append([InlineKeyboardButton(text='Рассылка клиентам', callback_data='broadcast:help')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.in_({'menu:about', 'menu:help'}))
+async def menu_info(callback: CallbackQuery):
+    await callback.answer()
+    text = ('<b>Что умеет Нейропостинг</b>\n\n'
+            '• Новости из выбранных источников: подготовка текста и расписание.\n'
+            '• Режим бизнеса: досье компании, проекты, фото и обязательное согласование.\n'
+            '• Настройки, история и контроль публикаций — в приложении.\n\n'
+            'ИИ может ошибаться: проверяйте факты и права на материалы перед публикацией.'
+            if callback.data == 'menu:about' else
+            '<b>Как начать</b>\n\n1. Откройте приложение и активируйте промокод.\n'
+            '2. Добавьте бота администратором своего канала с правом публикации.\n'
+            '3. Подключите канал в приложении.\n4. Выберите источники новостей или заполните досье компании.\n'
+            '5. Проверьте настройки и первый черновик.')
+    await callback.message.answer(text, parse_mode='HTML', reply_markup=miniapp_markup())
+
+
+@router.message(Command('help'))
+async def cmd_help(message: Message):
+    await message.answer('Откройте /start — там приложение, описание продукта и поддержка.\n'
+                         'Свой текст, ссылку или фото с подписью можно отправить сюда. Черновик появится в приложении.')
+
+
+@router.message(Command('status'))
+async def cmd_overview(message: Message) -> None:
     user = await ensure_user(message)
     markup = miniapp_markup()
     if has_access(user) and (message.text or '').split(maxsplit=1)[-1] == 'add_source':
