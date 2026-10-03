@@ -76,6 +76,9 @@ async def current_user(x_init_data: str = Header(default=""), request: Request =
         user = await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     if user["blocked"]:
         raise HTTPException(403, "доступ заблокирован")
+    from app.billing.service import sync_user
+    await sync_user(tg_id)
+    user = await db.fetch_one("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     return user
 
 
@@ -84,7 +87,7 @@ def is_admin(user: dict) -> bool:
 
 
 def has_access(user: dict) -> bool:
-    """Panel is invite-only: access comes from redeeming a promo code, admins always in."""
+    """Access comes from a paid subscription or an administrator's access code."""
     if user.get("blocked"):
         return False
     if is_admin(user):
@@ -95,7 +98,7 @@ def has_access(user: dict) -> bool:
 
 async def active_user(user: dict = Depends(current_user)) -> dict:
     if not has_access(user):
-        raise HTTPException(402, "нужен промокод")
+        raise HTTPException(402, "нужен действующий доступ")
     return user
 
 

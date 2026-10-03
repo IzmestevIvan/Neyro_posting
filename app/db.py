@@ -253,6 +253,10 @@ async def connect() -> asyncpg.Pool:
         async with _pool.acquire() as conn:
             await conn.execute(SCHEMA)
             await _apply_migrations(conn)
+            from app.billing.schema import SCHEMA as BILLING_SCHEMA
+            from app.api.account_auth import SCHEMA as ACCOUNT_SCHEMA
+            await conn.execute(BILLING_SCHEMA)
+            await conn.execute(ACCOUNT_SCHEMA)
     return _pool
 
 

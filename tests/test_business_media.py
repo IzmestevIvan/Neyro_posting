@@ -9,11 +9,16 @@ import pytest
 from PIL import Image
 from fastapi import HTTPException
 
-from app.core import business_media, publisher, business
+from app.core import business_media, publisher, business, features
 from app.api.routes import post_action
 from app.sources import web
 from tests.test_business import enable, TEXT
 from tests.test_pipeline_db import make_post, FakeBot
+
+
+@pytest.fixture(autouse=True)
+def enabled_business(monkeypatch):
+    monkeypatch.setattr(features, 'BUSINESS_MODE_ENABLED', True)
 
 
 def photo_bytes():

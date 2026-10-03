@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Нейропостинг</title>
+<title data-i18n="Нейропостинг" data-i18n-en="NeuroPost">Нейропостинг</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/static/preferences.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -32,73 +33,18 @@
 
 <div id="boot" class="boot"><span class="spinner"></span></div>
 
-<div id="tour" class="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle1" hidden>
+<div id="tour" class="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
   <div class="tour-shell">
     <header class="tour-head">
-      <span class="tour-brand"><span class="mark" aria-hidden="true"></span> Знакомство с редакцией</span>
-      <button id="tourSkip" class="tour-skip">Пропустить <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+      <span class="tour-brand"><span class="mark" aria-hidden="true"></span><span id="tourBrand">Учебник Нейропостинга</span></span>
+      <button id="tourSkip" class="tour-skip">Закрыть <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
     </header>
-    <div class="tour-track" id="tourTrack">
-      <section class="slide">
-        <div class="tour-visual scene-sources" aria-hidden="true">
-          <div class="demo-label">ВАШИ ИСТОЧНИКИ</div>
-          <div class="demo-source"><span class="demo-icon">TG</span><span><b>Новости города</b><small>Telegram-канал</small></span><span class="demo-dot"></span></div>
-          <div class="demo-source"><span class="demo-icon rss">RSS</span><span><b>Редакционный журнал</b><small>Лента публикаций</small></span><span class="demo-dot"></span></div>
-          <div class="demo-flow">↓</div>
-          <div class="demo-result"><svg class="ic"><use href="#i-inbox"/></svg> Материалы для вашего канала</div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">01 · ИСТОЧНИКИ</span><h2 id="tourTitle1">Хороший пост начинается с источника</h2><p>Добавьте Telegram-каналы или RSS-ленты. Бот будет собирать новые материалы для вашей редакции.</p><div class="tour-tip">Начните с 2–3 источников по теме канала.</div></div>
-      </section>
-      <section class="slide" hidden>
-        <div class="tour-visual scene-filter" aria-hidden="true">
-          <div class="demo-label">ПЕРВЫЙ ОТБОР</div>
-          <div class="demo-filter"><span>Новая станция метро</span><b class="demo-good">Новость</b></div>
-          <div class="demo-filter"><span>Повтор вчерашнего поста</span><b>Дубль</b></div>
-          <div class="demo-filter"><span>Предложение со скидкой</span><b class="demo-amber">Проверить</b></div>
-          <div class="demo-footnote"><svg class="ic"><use href="#i-shield"/></svg> Спорные материалы — на одобрение</div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">02 · ОТБОР</span><h2 id="tourTitle2">Меньше лишнего. Больше по теме.</h2><p>Фильтры ищут дубли, рекламу и оффтоп. Добавьте стоп-слова, чтобы точнее настроить отбор.</p><div class="tour-tip">Фильтр может ошибиться. Причину решения можно посмотреть в панели.</div></div>
-      </section>
-      <section class="slide" hidden>
-        <div class="tour-visual scene-style" aria-hidden="true">
-          <div class="demo-label">ВАШИ ИНСТРУКЦИИ</div>
-          <div class="demo-prompt">«Коротко и по делу.<br>Спокойный тон, без канцелярита»</div>
-          <div class="demo-paper"><small>ЧЕРНОВИК</small><b>В городе появится новый парк</b><span>Зелёная зона с прогулочными дорожками откроется осенью.</span><div class="demo-lines"><i></i><i></i></div></div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">03 · ВАШ СТИЛЬ</span><h2 id="tourTitle3">Объясните стиль своими словами</h2><p>Задайте тон, длину и язык постов. Нейросеть перепишет материал по вашим инструкциям.</p><div class="tour-tip">Свои тексты и ссылки можно отправлять прямо в чат с ботом.</div></div>
-      </section>
-      <section class="slide" hidden>
-        <div class="tour-visual scene-facts" aria-hidden="true">
-          <div class="demo-label">СВЕРКА С ОРИГИНАЛОМ</div>
-          <div class="demo-verify"><svg class="ic"><use href="#i-shield"/></svg><b>Проверка фактов</b><small>Режим «Суперпостинг»</small></div>
-          <div class="demo-check"><span>Имена и названия</span><svg class="ic"><use href="#i-check"/></svg></div>
-          <div class="demo-check"><span>Числа и даты</span><svg class="ic"><use href="#i-check"/></svg></div>
-          <div class="demo-check"><span>Цитаты и смысл</span><svg class="ic"><use href="#i-check"/></svg></div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">04 · ПРОВЕРКА</span><h2 id="tourTitle4">Ещё один взгляд перед публикацией</h2><p>В «Суперпостинге» отдельная проверка сравнивает черновик с исходником: ищет выдумки и искажения.</p><div class="tour-tip">Вердикт виден на карточке. Важные факты всё равно стоит проверить самому.</div></div>
-      </section>
-      <section class="slide" hidden>
-        <div class="tour-visual scene-plan" aria-hidden="true">
-          <div class="demo-label">РИТМ ВАШЕГО КАНАЛА</div>
-          <div class="demo-slot"><span>09:00</span><b>Утренние новости</b><span class="demo-dot"></span></div>
-          <div class="demo-slot"><span>14:00</span><b>Главное за день</b><span class="demo-dot"></span></div>
-          <div class="demo-slot"><span>19:00</span><b>Вечерний материал</b><span class="demo-dot"></span></div>
-          <div class="demo-result"><svg class="ic"><use href="#i-check"/></svg> Автоматически или с вашим одобрением</div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">05 · ПУБЛИКАЦИЯ</span><h2 id="tourTitle5">Вы решаете, когда пост выйдет</h2><p>Настройте часы и темп автопостинга. Или оставьте ручной режим, чтобы одобрять каждый готовый пост.</p><div class="tour-tip">«Опубликовать сейчас» отправляет пост сразу. Дневной лимит сохраняется.</div></div>
-      </section>
-      <section class="slide" hidden>
-        <div class="tour-visual scene-ads" aria-hidden="true">
-          <div class="demo-label">ВОЗМОЖНАЯ РЕКЛАМА</div>
-          <div class="demo-paper"><span class="demo-amber demo-badge">На разбор</span><b>Предложение из источника</b><span>Текст, найденные контакты и причина определения — в одной карточке.</span><div class="demo-faux-button">Это не реклама</div></div>
-          <div class="demo-footnote"><svg class="ic"><use href="#i-inbox"/></svg> Архив доступен в любой момент</div>
-        </div>
-        <div class="tour-copy"><span class="eyebrow">06 · ПОЛНЫЙ КОНТРОЛЬ</span><h2 id="tourTitle6">Рекламе — отдельное место</h2><p>Возможная реклама собирается отдельно. Смотрите причины, разбирайте предложения и отмечайте ошибки фильтра.</p><div class="tour-tip">Вернуться к этому знакомству можно в настройках.</div></div>
-      </section>
-    </div>
+    <div class="tutorial-topics"><label id="tourTopicsLabel" for="tourTopics">Перейти к теме</label><div class="select-wrap"><select id="tourTopics"></select></div></div>
+    <div class="tour-track" id="tourTrack"></div>
     <footer class="tour-foot">
-      <div class="tour-progress"><span id="tourCounter" aria-live="polite">01 / 06</span><div class="dots" id="tourDots" role="group" aria-label="Выбрать слайд"></div></div>
-      <div class="tour-controls"><button id="tourPrev" class="tour-prev" aria-label="Предыдущий слайд"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button><button id="tourNext" class="accent">Дальше <svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button></div>
+      <div class="tour-progress"><span id="tourCounter" aria-live="polite">01 / 08</span><button id="tourRestart" class="text-link">Начать сначала</button></div>
+      <div class="tour-controls"><button id="tourPrev" class="tour-prev" aria-label="Предыдущая тема" data-i18n-aria-label="Предыдущая тема" data-i18n-aria-label-en="Previous topic"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button><button id="tourNext" class="accent">Дальше <svg class="ic" aria-hidden="true"><use href="#i-back"/></svg></button></div>
+      <p id="tourSaved" class="hint" role="status"></p>
     </footer>
   </div>
 </div>
@@ -108,40 +54,58 @@
     <div class="brand">
       <span class="mark"></span>
       <div>
-        <h1>Нейропостинг</h1>
+        <h1><span data-i18n="Нейропостинг" data-i18n-en="NeuroPost">Нейропостинг</span></h1>
         <p id="status" class="status">—</p>
       </div>
     </div>
-    <button id="openAdmin" class="ghost" hidden title="Админ-панель">
+    <div class="header-actions"><button id="openTutorial" class="ghost square" data-tutorial aria-label="Как работает Нейропостинг" data-i18n-aria-label="Как работает Нейропостинг" data-i18n-aria-label-en="How NeuroPost works" title="Как работает Нейропостинг" data-i18n-title="Как работает Нейропостинг" data-i18n-title-en="How NeuroPost works">?</button><button class="profile-button" data-go="billing" aria-label="Мой тариф" data-i18n-aria-label="Мой тариф" data-i18n-aria-label-en="My plan"><span id="profileInitial"><span data-i18n="Н" data-i18n-en="N">Н</span></span></button>
+    <button id="openAdmin" class="ghost" hidden title="Админ-панель" data-i18n-title="Админ-панель" data-i18n-title-en="Admin dashboard">
       <svg class="ic"><use href="#i-shield"/></svg>
-    </button>
+    </button></div>
   </header>
+
+  <details class="interface-preferences">
+    <summary><span data-i18n="Тема и язык" data-i18n-en="Theme and language">Тема и язык</span></summary>
+    <div class="preferences">
+      <label><span data-i18n="Оформление" data-i18n-en="Appearance">Оформление</span><select data-pref-theme>
+        <option value="system" data-i18n="Как на устройстве" data-i18n-en="Use device setting">Как на устройстве</option>
+        <option value="light" data-i18n="Светлая" data-i18n-en="Light">Светлая</option>
+        <option value="dark" data-i18n="Тёмная" data-i18n-en="Dark">Тёмная</option>
+      </select></label>
+      <label><span data-i18n="Язык интерфейса" data-i18n-en="Interface language">Язык интерфейса</span><select data-pref-language>
+        <option value="auto" data-i18n="Как на устройстве" data-i18n-en="Use device setting">Как на устройстве</option>
+        <option value="ru">Русский</option><option value="en">English</option>
+      </select></label>
+    </div>
+  </details>
 
   <div class="channelbar" id="channelBar">
     <div class="select-wrap">
-      <select id="channelSelect" aria-label="Текущий канал"></select>
+      <select id="channelSelect" aria-label="Текущий канал" data-i18n-aria-label="Текущий канал" data-i18n-aria-label-en="Current channel"></select>
     </div>
-    <button id="addChannel" class="ghost square" title="Добавить канал">
+    <button id="addChannel" class="ghost square" title="Добавить канал" data-i18n-title="Добавить канал" data-i18n-title-en="Add channel">
       <svg class="ic"><use href="#i-plus"/></svg>
     </button>
   </div>
 
   <div class="addrow" id="addChannelRow" hidden>
-    <input type="text" id="channelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off">
-    <button id="channelSubmit" aria-label="Подключить канал" class="accent square"><svg class="ic"><use href="#i-check"/></svg></button>
+    <input type="text" id="channelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off" data-i18n-placeholder="@username канала" data-i18n-placeholder-en="Channel @username">
+    <button id="channelSubmit" aria-label="Подключить канал" class="accent square" data-i18n-aria-label="Подключить канал" data-i18n-aria-label-en="Connect channel"><svg class="ic"><use href="#i-check"/></svg></button>
   </div>
 
   <!-- ворота по промокоду -->
   <section id="gate" class="page" hidden>
     <div class="card hero">
       <svg class="ic xl"><use href="#i-key"/></svg>
-      <h2>Доступ по коду</h2>
-      <p class="muted">Введите промокод, который вы получили. Он открывает панель, задаёт лимит
-        постов в день и число каналов.</p>
+      <h2><span data-i18n="Ваш доступ" data-i18n-en="Your access">Ваш доступ</span></h2>
+      <p class="muted"><span data-i18n="Здесь появится подключённый тариф. Если у вас есть код доступа, активируйте его ниже." data-i18n-en="Your current plan will appear here. If you have an access code, activate it below.">Здесь появится подключённый тариф. Если у вас есть код доступа, активируйте его ниже.</span></p>
+      <button class="ghost wide" data-go="billing"><span data-i18n="Проверить доступ" data-i18n-en="Check access">Проверить доступ</span></button>
+      <p class="gate-divider"><span data-i18n="Есть код доступа?" data-i18n-en="Have an access code?">Есть код доступа?</span></p>
       <input type="text" id="promoInput" class="code" placeholder="ABCD-2345" maxlength="9"
              autocapitalize="characters" autocorrect="off" spellcheck="false">
-      <button id="promoSubmit" class="accent wide">Активировать</button>
+      <button id="promoSubmit" class="accent wide"><span data-i18n="Активировать" data-i18n-en="Activate">Активировать</span></button>
       <p class="muted small" id="gateHint"></p>
+      <button class="text-link" data-tutorial data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</button>
     </div>
   </section>
 
@@ -149,94 +113,93 @@
   <section id="onboarding" class="page" hidden>
     <div class="card hero">
       <svg class="ic xl"><use href="#i-sources"/></svg>
-      <h2>Подключите канал</h2>
+      <h2><span data-i18n="Подключите канал" data-i18n-en="Connect your channel">Подключите канал</span></h2>
       <ol class="steps">
-        <li>Добавьте <b id="botName">бота</b> администратором канала и дайте право публиковать сообщения.</li>
-        <li>Введите ниже @username канала.</li>
+        <li><span data-i18n="Добавьте" data-i18n-en="Add">Добавьте</span> <b id="botName"><span data-i18n="бота" data-i18n-en="the bot">бота</span></b> <span data-i18n="администратором канала и дайте право публиковать сообщения." data-i18n-en="as a channel administrator with permission to post messages.">администратором канала и дайте право публиковать сообщения.</span></li>
+        <li><span data-i18n="Введите ниже @username канала." data-i18n-en="Enter your channel’s @username below.">Введите ниже @username канала.</span></li>
       </ol>
-      <input type="text" id="firstChannelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off">
-      <button id="firstChannelSubmit" class="accent wide">Добавить канал</button>
+      <input type="text" id="firstChannelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off" data-i18n-placeholder="@username канала" data-i18n-placeholder-en="Channel @username">
+      <button id="firstChannelSubmit" class="accent wide"><span data-i18n="Добавить канал" data-i18n-en="Add channel">Добавить канал</span></button>
+      <button class="text-link" data-tutorial data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</button>
     </div>
   </section>
 
   <!-- главная -->
   <section id="page-home" class="page">
-    <div class="workspace-intro"><span class="eyebrow">ВАША РЕДАКЦИЯ</span><h2>Всё готово к следующему посту?</h2><p class="muted">Источники, проверка и публикация — под вашим контролем.</p></div>
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ВАШ КАНАЛ" data-i18n-en="YOUR CHANNEL">ВАШ КАНАЛ</span></span><h2><span data-i18n="Всё под рукой" data-i18n-en="Everything in one place">Всё под рукой</span></h2><p class="muted"><span data-i18n="Проверьте посты — и продолжайте свой день." data-i18n-en="Review your posts and get on with your day.">Проверьте посты — и продолжайте свой день.</span></p></div>
     <div id="nextStep" class="next-step" aria-live="polite"></div>
-    <p id="channelBlockers" class="card hint" role="status" hidden></p>
-    <details id="queueDetails" class="card queue-details" hidden>
-      <summary>Состояние очереди</summary>
-      <p id="queueReason" class="hint"></p>
-    </details>
     <div id="statsGrid" class="grid"></div>
-    <button id="publishNow" class="accent wide tall">
-      <svg class="ic"><use href="#i-bolt"/></svg> Опубликовать сейчас
-    </button>
-    <p id="publishHint" class="hint action-hint">Подготовит один свежий пост из источников и опубликует сейчас, вне расписания.</p>
-    <h3 class="section">Публикации · 7 дней</h3>
-    <div id="postsChart" class="card chart"></div>
-    <h3 class="section">Подписчики</h3>
-    <div id="subsChart" class="card chart"></div>
+    <div class="home-actions">
+      <button class="action-tile" data-go="sources"><span class="tile-icon"><svg class="ic"><use href="#i-sources"/></svg></span><span><b><span data-i18n="Источники" data-i18n-en="Sources">Источники</span></b><small><span data-i18n="Откуда брать материалы" data-i18n-en="Where to find content">Откуда брать материалы</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button>
+      <button class="action-tile" data-go="billing"><span class="tile-icon"><svg class="ic"><use href="#i-bolt"/></svg></span><span><b><span data-i18n="Мой тариф" data-i18n-en="My plan">Мой тариф</span></b><small id="homePlanHint"><span data-i18n="Доступ и лимиты" data-i18n-en="Access and limits">Доступ и лимиты</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button>
+    </div>
+    <div class="publish-card card"><div><h3><span data-i18n="Свежий пост прямо сейчас" data-i18n-en="A fresh post right now">Свежий пост прямо сейчас</span></h3><p id="publishHint" class="hint"><span data-i18n="Найдём материал в источниках и опубликуем его в канале." data-i18n-en="Find content in your sources and publish it to your channel.">Найдём материал в источниках и опубликуем его в канале.</span></p></div><button id="publishNow" class="accent"><span data-i18n="Опубликовать сейчас" data-i18n-en="Publish now">Опубликовать сейчас</span> <svg class="ic"><use href="#i-bolt"/></svg></button></div>
+    <p id="channelBlockers" class="notice" role="status" hidden></p>
+    <details class="card group analytics"><summary><span><span data-i18n="Статистика за неделю" data-i18n-en="Weekly overview">Статистика за неделю</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary><div class="body"><h3 class="section"><span data-i18n="Публикации" data-i18n-en="Publications">Публикации</span></h3><div id="postsChart" class="chart"></div><h3 class="section"><span data-i18n="Подписчики" data-i18n-en="Subscribers">Подписчики</span></h3><div id="subsChart" class="chart"></div></div></details>
+    <details id="queueDetails" class="queue-details" hidden><summary><span data-i18n="Что происходит с материалами" data-i18n-en="Content processing status">Что происходит с материалами</span></summary><p id="queueReason" class="hint"></p></details>
   </section>
 
   <!-- лента -->
   <section id="page-feed" class="page" hidden>
-    <div class="workspace-intro"><span class="eyebrow">КОНТЕНТ</span><h2>Публикации</h2></div>
-    <div class="feed-tabs" role="group" aria-label="Список публикаций"><button id="showPending" class="on" aria-pressed="true">На проверке <span id="pendingCount">0</span></button><button id="showHistory" aria-pressed="false">История</button></div>
-    <p class="hint">Новости и ручные посты на проверке находятся здесь, без рассылки в личный чат.
-      Ссылку или свой текст можно отправить боту — подготовленный пост появится в приложении.</p>
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="КОНТЕНТ" data-i18n-en="CONTENT">КОНТЕНТ</span></span><h2><span data-i18n="Публикации" data-i18n-en="Publications">Публикации</span></h2></div>
+    <div class="feed-tabs" role="group" aria-label="Список публикаций" data-i18n-aria-label="Список публикаций" data-i18n-aria-label-en="Publication list"><button id="showPending" class="on" aria-pressed="true"><span data-i18n="На проверке" data-i18n-en="For review">На проверке</span> <span id="pendingCount">0</span></button><button id="showHistory" aria-pressed="false"><span data-i18n="История" data-i18n-en="History">История</span></button></div>
+    <p class="hint"><span data-i18n="Проверьте черновик и нажмите «Опубликовать». Свой текст или ссылку можно отправить боту." data-i18n-en="Review the draft and select Publish. You can send your own text or a link to the bot.">Проверьте черновик и нажмите «Опубликовать». Свой текст или ссылку можно отправить боту.</span></p>
+    <button class="text-link feed-secondary" data-go="ads"><span data-i18n="Отфильтрованная реклама" data-i18n-en="Filtered ads">Отфильтрованная реклама</span> <i id="adsBadge" class="inline-count" hidden></i><svg class="ic forward"><use href="#i-back"/></svg></button>
     <div id="feed"></div><div id="history" hidden></div>
   </section>
 
   <!-- реклама -->
   <section id="page-ads" class="page" hidden>
-    <div class="feed-tabs" role="group" aria-label="Рекламные материалы"><button id="adsActive" class="on">На разбор</button><button id="adsArchive">Архив</button></div>
-    <h3 class="section">Возможная реклама · <span id="adsCount">0</span></h3>
-    <p class="hint">Материалы, которые фильтр посчитал рекламой. Проверьте причину: система может ошибаться. Кнопка «Это не реклама» уберёт ошибочную запись в архив; исходный пост автоматически не публикуется.</p>
+    <button class="back-link" data-go="feed"><svg class="ic"><use href="#i-back"/></svg> <span data-i18n="К публикациям" data-i18n-en="Back to posts">К публикациям</span></button>
+    <div class="workspace-intro"><h2><span data-i18n="Отфильтрованная реклама" data-i18n-en="Filtered ads">Отфильтрованная реклама</span></h2><p class="muted"><span data-i18n="Проверьте материалы, которые не попали в ленту." data-i18n-en="Review content that was filtered out of your feed.">Проверьте материалы, которые не попали в ленту.</span></p></div>
+    <div class="feed-tabs" role="group" aria-label="Рекламные материалы" data-i18n-aria-label="Рекламные материалы" data-i18n-aria-label-en="Advertising materials"><button id="adsActive" class="on"><span data-i18n="На разбор" data-i18n-en="To review">На разбор</span></button><button id="adsArchive"><span data-i18n="Архив" data-i18n-en="Archive">Архив</span></button></div>
+    <h3 class="section"><span data-i18n="Возможная реклама ·" data-i18n-en="Possible ads ·">Возможная реклама ·</span> <span id="adsCount">0</span></h3>
+    <p class="hint"><span data-i18n="Материалы, которые фильтр посчитал рекламой. Проверьте причину: система может ошибаться. Кнопка «Это не реклама» уберёт ошибочную запись в архив; исходный пост автоматически не публикуется." data-i18n-en="Content marked as advertising by the filter. Check the reason: the system can make mistakes. “Not an ad” archives an incorrect entry; it does not publish the original post.">Материалы, которые фильтр посчитал рекламой. Проверьте причину: система может ошибаться. Кнопка «Это не реклама» уберёт ошибочную запись в архив; исходный пост автоматически не публикуется.</span></p>
     <div id="ads"></div>
   </section>
 
   <!-- источники -->
   <section id="page-sources" class="page" hidden>
-    <h3 class="section">Источники · <span id="sourcesCount">0</span></h3>
-    <p class="hint">Откуда бот берёт новости: @канал, ссылка t.me или адрес RSS-ленты.</p>
+    <button class="back-link" data-go="settings"><svg class="ic"><use href="#i-back"/></svg> <span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></button>
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="МАТЕРИАЛЫ ДЛЯ КАНАЛА" data-i18n-en="CHANNEL CONTENT">МАТЕРИАЛЫ ДЛЯ КАНАЛА</span></span><h2><span data-i18n="Источники" data-i18n-en="Sources">Источники</span> <span id="sourcesCount" class="title-count">0</span></h2><p class="muted"><span data-i18n="Добавьте @канал, ссылку t.me или RSS-ленту." data-i18n-en="Add a @channel, t.me link or RSS feed.">Добавьте @канал, ссылку t.me или RSS-ленту.</span></p></div>
     <div class="source-shortcuts">
-      <button id="sourceBatchOpen" class="accent">Добавить списком</button>
-      <button id="sourceCopyOpen" class="ghost">Из моего канала</button>
-      <button id="sourceBotOpen" class="ghost">Переслать боту</button>
+      <button id="sourceBatchOpen" class="accent"><span data-i18n="Добавить списком" data-i18n-en="Add a list">Добавить списком</span></button>
+      <button id="sourceCopyOpen" class="ghost"><span data-i18n="Из моего канала" data-i18n-en="From my channel">Из моего канала</span></button>
+      <button id="sourceBotOpen" class="ghost"><span data-i18n="Переслать боту" data-i18n-en="Forward to bot">Переслать боту</span></button>
     </div>
     <div id="sourceBatchPanel" class="card copy-content" hidden>
-      <label for="sourceBatchInput">Вставьте до 20 каналов или RSS-ссылок</label>
+      <label for="sourceBatchInput"><span data-i18n="Вставьте до 20 каналов или RSS-ссылок" data-i18n-en="Paste up to 20 channels or RSS links">Вставьте до 20 каналов или RSS-ссылок</span></label>
       <textarea id="sourceBatchInput" rows="5" placeholder="@channel_one&#10;https://t.me/channel_two&#10;https://example.com/rss"></textarea>
-      <p class="hint">По одному адресу на строку. Каждый источник проверим, повторы пропустим.</p>
-      <button id="sourceBatchAdd" class="accent">Проверить и добавить</button>
-      <button id="sourceBatchCancel" hidden>Остановить</button>
+      <p class="hint"><span data-i18n="По одному адресу на строку. Каждый источник проверим, повторы пропустим." data-i18n-en="One address per line. We will check each source and skip duplicates.">По одному адресу на строку. Каждый источник проверим, повторы пропустим.</span></p>
+      <button id="sourceBatchAdd" class="accent"><span data-i18n="Проверить и добавить" data-i18n-en="Check and add">Проверить и добавить</span></button>
+      <button id="sourceBatchCancel" hidden><span data-i18n="Остановить" data-i18n-en="Stop">Остановить</span></button>
       <div id="sourceBatchStatus" role="status" aria-live="polite"></div>
     </div>
     <div class="addrow">
-      <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss">
-      <button id="addSource" aria-label="Добавить источник" class="accent square"><svg class="ic"><use href="#i-plus"/></svg></button>
+      <input type="text" id="sourceInput" placeholder="@moscowach или https://…/rss" data-i18n-placeholder="@moscowach или https://…/rss" data-i18n-placeholder-en="@channel or https://…/rss">
+      <button id="addSource" aria-label="Добавить источник" class="accent square" data-i18n-aria-label="Добавить источник" data-i18n-aria-label-en="Add source"><svg class="ic"><use href="#i-plus"/></svg></button>
     </div>
     <details class="card group" id="copySourcesPanel">
-      <summary>Скопировать из другого канала</summary>
+      <summary><span data-i18n="Скопировать из другого канала" data-i18n-en="Copy from another channel">Скопировать из другого канала</span></summary>
       <div class="copy-content">
-      <p class="hint">Выберите источники своего канала. Уже добавленные будут пропущены.</p>
-      <label for="copyFromChannel">Откуда скопировать</label>
-      <select id="copyFromChannel"><option value="">Выберите канал</option></select>
-      <div id="copySourceList" role="group" aria-label="Источники для копирования"></div>
-      <button id="copySources" class="accent" disabled>Добавить выбранные</button>
+      <p class="hint"><span data-i18n="Выберите источники своего канала. Уже добавленные будут пропущены." data-i18n-en="Select sources from one of your channels. Sources already added will be skipped.">Выберите источники своего канала. Уже добавленные будут пропущены.</span></p>
+      <label for="copyFromChannel"><span data-i18n="Откуда скопировать" data-i18n-en="Copy from">Откуда скопировать</span></label>
+      <select id="copyFromChannel"><option value="" data-i18n="Выберите канал" data-i18n-en="Select a channel">Выберите канал</option></select>
+      <div id="copySourceList" role="group" aria-label="Источники для копирования" data-i18n-aria-label="Источники для копирования" data-i18n-aria-label-en="Sources to copy"></div>
+      <button id="copySources" class="accent" disabled><span data-i18n="Добавить выбранные" data-i18n-en="Add selected">Добавить выбранные</span></button>
       <p id="copySourcesStatus" class="hint" role="status"></p>
       </div>
     </details>
-    <p class="hint">Ещё быстрее: перешлите боту пост публичного канала и нажмите «Добавить канал как источник».</p>
+    <p class="hint"><span data-i18n="Ещё быстрее: перешлите боту пост публичного канала и нажмите «Добавить канал как источник»." data-i18n-en="Or forward a public channel’s post to the bot and select “Add channel as a source”.">Ещё быстрее: перешлите боту пост публичного канала и нажмите «Добавить канал как источник».</span></p>
     <div id="sources"></div>
   </section>
 
   <!-- настройки -->
   <section id="page-settings" class="page" hidden>
-    <div class="workspace-intro"><span class="eyebrow">ПРАВИЛА КАНАЛА</span><h2>Настройки редакции</h2><p id="saveStatus" class="hint" role="status">Переключатели сохраняются сразу. Текст — кнопкой под полем.</p></div>
-    <a id="supportLink" class="ghost support-link" hidden target="_blank" rel="noopener noreferrer">Написать в поддержку <span aria-hidden="true">↗</span></a>
-    <details class="card group" id="businessSettings">
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ПОД ВАШИ ЗАДАЧИ" data-i18n-en="MAKE IT YOURS">ПОД ВАШИ ЗАДАЧИ</span></span><h2><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></h2><p id="saveStatus" class="hint" role="status"><span data-i18n="Переключатели сохраняются сразу." data-i18n-en="Changes to switches are saved immediately.">Переключатели сохраняются сразу.</span></p></div>
+    <div class="settings-shortcuts"><button class="action-tile" data-go="sources"><span class="tile-icon"><svg class="ic"><use href="#i-sources"/></svg></span><span><b><span data-i18n="Источники" data-i18n-en="Sources">Источники</span></b><small><span data-i18n="Добавить и настроить" data-i18n-en="Add and manage">Добавить и настроить</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button><button class="action-tile" data-go="billing"><span class="tile-icon"><svg class="ic"><use href="#i-bolt"/></svg></span><span><b><span data-i18n="Мой тариф" data-i18n-en="My plan">Мой тариф</span></b><small><span data-i18n="Посмотреть лимиты" data-i18n-en="View limits">Посмотреть лимиты</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button></div>
+    <a id="supportLink" class="ghost support-link" hidden target="_blank" rel="noopener noreferrer"><span data-i18n="Написать в поддержку" data-i18n-en="Contact support">Написать в поддержку</span> <span aria-hidden="true">↗</span></a>
+    <details class="card group" id="businessSettings" hidden inert>
       <summary><span>Для бизнеса · досье компании</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
         <label class="row"><span><b>Режим бизнеса</b><i>Каждый пост — только после согласования</i></span><input type="checkbox" data-field="business_mode"></label>
@@ -261,23 +224,23 @@
         <p id="businessStatus" class="hint" role="status">Готовые черновики появятся во вкладке «Посты».</p>
       </div>
     </details>
-    <details class="card group" open>
-      <summary><span>Публикация</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+    <details class="card group">
+      <summary><span><span data-i18n="Расписание и публикация" data-i18n-en="Schedule and publishing">Расписание и публикация</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
         <label class="row">
-          <span><b>Автопостинг</b><i>публиковать без одобрения</i></span>
+          <span><b><span data-i18n="Автопостинг" data-i18n-en="Auto-publishing">Автопостинг</span></b><i><span data-i18n="публиковать без одобрения" data-i18n-en="publish without approval">публиковать без одобрения</span></i></span>
           <input type="checkbox" data-field="autopost">
         </label>
         <label class="row">
-          <span><b>Пауза</b><i>не проверять источники</i></span>
+          <span><b><span data-i18n="Пауза" data-i18n-en="Pause">Пауза</span></b><i><span data-i18n="не проверять источники" data-i18n-en="stop checking sources">не проверять источники</span></i></span>
           <input type="checkbox" data-field="paused">
         </label>
-        <p class="label">Задержка перед публикацией</p>
+        <p class="label"><span data-i18n="Задержка перед публикацией" data-i18n-en="Delay before publishing">Задержка перед публикацией</span></p>
         <div class="chips" id="delayChips"></div>
-        <p class="label">Темп: постов в день, равномерно в окне</p>
+        <p class="label"><span data-i18n="Темп: постов в день, равномерно в окне" data-i18n-en="Pace: posts per day, spread across the time window">Темп: постов в день, равномерно в окне</span></p>
         <div class="chips" id="paceChips"></div>
         <div class="row">
-          <span><b>Окно публикации</b><i>часы по времени канала</i></span>
+          <span><b><span data-i18n="Окно публикации" data-i18n-en="Publishing window">Окно публикации</span></b><i><span data-i18n="часы по времени канала" data-i18n-en="hours in the channel’s time zone">часы по времени канала</span></i></span>
           <span class="window">
             <input type="number" min="0" max="23" data-field="window_start" class="num">
             <em>—</em>
@@ -285,49 +248,49 @@
           </span>
         </div>
         <div class="row">
-          <span><b>Часовой пояс</b><i>для окна и дайджеста</i></span>
+          <span><b><span data-i18n="Часовой пояс" data-i18n-en="Time zone">Часовой пояс</span></b><i><span data-i18n="для окна и дайджеста" data-i18n-en="for the publishing window and digest">для окна и дайджеста</span></i></span>
           <span class="select-wrap compact"><select data-field="tz" id="tzSelect"></select></span>
         </div>
       </div>
     </details>
 
     <details class="card group">
-      <summary><span>Контент</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <summary><span><span data-i18n="Тексты и отбор материалов" data-i18n-en="Writing and content selection">Тексты и отбор материалов</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
         <div class="quality">
-          <p class="quality-name" id="qualityTitle">Суперпостинг</p>
+          <p class="quality-name" id="qualityTitle"><span data-i18n="Суперпостинг" data-i18n-en="Superposting">Суперпостинг</span></p>
           <input type="range" min="0" max="2" step="1" id="quality" class="slider">
-          <div class="slider-legend"><span>Быстро</span><span>Баланс</span><span>Суперпостинг</span></div>
+          <div class="slider-legend"><span><span data-i18n="Быстро" data-i18n-en="Fast">Быстро</span></span><span><span data-i18n="Баланс" data-i18n-en="Balanced">Баланс</span></span><span><span data-i18n="Суперпостинг" data-i18n-en="Superposting">Суперпостинг</span></span></div>
           <p class="hint" id="qualityHint"></p>
         </div>
 
-        <p class="label">Инструкции нейросети: тон, темы, запреты — своими словами</p>
+        <p class="label"><span data-i18n="Инструкции нейросети: тон, темы, запреты — своими словами" data-i18n-en="AI instructions: tone, topics and restrictions in your own words">Инструкции нейросети: тон, темы, запреты — своими словами</span></p>
         <textarea data-field="instructions" rows="4"
-          placeholder="Ищи новости про Москву, начинай со смайлика, пост не длиннее 180 слов"></textarea>
-        <button class="accent wide" data-save="instructions">Сохранить инструкции</button>
+          placeholder="Ищи новости про Москву, начинай со смайлика, пост не длиннее 180 слов" data-i18n-placeholder="Ищи новости про Москву, начинай со смайлика, пост не длиннее 180 слов" data-i18n-placeholder-en="Find news about London, start with an emoji, use no more than 180 words"></textarea>
+        <button class="accent wide" data-save="instructions"><span data-i18n="Сохранить инструкции" data-i18n-en="Save instructions">Сохранить инструкции</span></button>
 
-        <p class="label">Стоп-слова: пост с любым из них отбрасывается сразу</p>
-        <textarea data-field="stopwords" rows="2" placeholder="казино, промокод, 18+"></textarea>
-        <button class="accent wide" data-save="stopwords">Сохранить стоп-слова</button>
+        <p class="label"><span data-i18n="Стоп-слова: пост с любым из них отбрасывается сразу" data-i18n-en="Blocked words: any match immediately rejects a post">Стоп-слова: пост с любым из них отбрасывается сразу</span></p>
+        <textarea data-field="stopwords" rows="2" placeholder="казино, промокод, 18+" data-i18n-placeholder="казино, промокод, 18+" data-i18n-placeholder-en="casino, promo code, 18+"></textarea>
+        <button class="accent wide" data-save="stopwords"><span data-i18n="Сохранить стоп-слова" data-i18n-en="Save blocked words">Сохранить стоп-слова</span></button>
 
         <div class="row">
-          <span><b>Язык канала</b><i>посты переводятся на него</i></span>
+          <span><b><span data-i18n="Язык канала" data-i18n-en="Channel language">Язык канала</span></b><i><span data-i18n="посты переводятся на него" data-i18n-en="posts are translated into this language">посты переводятся на него</span></i></span>
           <span class="select-wrap compact"><select data-field="lang" id="langSelect"></select></span>
         </div>
         <label class="row">
-          <span><b>Голос канала</b><i>подражать стилю ваших постов</i></span>
+          <span><b><span data-i18n="Голос канала" data-i18n-en="Channel voice">Голос канала</span></b><i><span data-i18n="подражать стилю ваших постов" data-i18n-en="match the style of your posts">подражать стилю ваших постов</span></i></span>
           <input type="checkbox" data-field="channel_voice">
         </label>
         <label class="row">
-          <span><b>Только хиты</b><i>брать посты популярнее медианы источника</i></span>
+          <span><b><span data-i18n="Только хиты" data-i18n-en="Popular posts only">Только хиты</span></b><i><span data-i18n="брать посты популярнее медианы источника" data-i18n-en="select posts above the source’s median popularity">брать посты популярнее медианы источника</span></i></span>
           <input type="checkbox" data-field="hits_only">
         </label>
         <label class="row">
-          <span><b>Только с медиа</b><i>пропускать посты без фото и видео</i></span>
+          <span><b><span data-i18n="Только с медиа" data-i18n-en="Media only">Только с медиа</span></b><i><span data-i18n="пропускать посты без фото и видео" data-i18n-en="skip posts without photos or videos">пропускать посты без фото и видео</span></i></span>
           <input type="checkbox" data-field="media_only">
         </label>
         <div class="row">
-          <span><b>Вечерний дайджест</b><i>короткие новости — одной сводкой</i></span>
+          <span><b><span data-i18n="Вечерний дайджест" data-i18n-en="Evening digest">Вечерний дайджест</span></b><i><span data-i18n="короткие новости — одной сводкой" data-i18n-en="combine short news into one summary">короткие новости — одной сводкой</span></i></span>
           <span class="pair">
             <span class="select-wrap compact"><select data-field="digest_time" id="digestTime"></select></span>
             <input type="checkbox" data-field="digest_enabled">
@@ -337,123 +300,131 @@
     </details>
 
     <details class="card group">
-      <summary><span>Оформление</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <summary><span><span data-i18n="Оформление" data-i18n-en="Appearance">Оформление</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
-        <p class="hint">Подпись-ссылка под постами. Пустая ссылка ведёт на этот канал,
-          пустой текст — без подписи.</p>
-        <input type="text" data-field="signature_text" placeholder="Подписаться">
-        <input type="text" data-field="signature_url" id="sigUrl" placeholder="пусто — на этот канал">
-        <p class="label">Так это увидят в канале</p>
+        <p class="hint"><span data-i18n="Подпись-ссылка под постами. Пустая ссылка ведёт на этот канал,
+          пустой текст — без подписи." data-i18n-en="A linked signature below posts. A blank link points to this channel; blank text removes the signature.">Подпись-ссылка под постами. Пустая ссылка ведёт на этот канал,
+          пустой текст — без подписи.</span></p>
+        <input type="text" data-field="signature_text" placeholder="Подписаться" data-i18n-placeholder="Подписаться" data-i18n-placeholder-en="Subscribe">
+        <input type="text" data-field="signature_url" id="sigUrl" placeholder="пусто — на этот канал" data-i18n-placeholder="пусто — на этот канал" data-i18n-placeholder-en="leave blank to link to this channel">
+        <p class="label"><span data-i18n="Так это увидят в канале" data-i18n-en="Preview in your channel">Так это увидят в канале</span></p>
         <div class="preview"><span id="sigPreview"></span></div>
-        <button class="accent wide" data-save="signature">Сохранить подпись</button>
+        <button class="accent wide" data-save="signature"><span data-i18n="Сохранить подпись" data-i18n-en="Save signature">Сохранить подпись</span></button>
         <label class="row">
-          <span><b>Водяной знак</b><i>PNG с прозрачным фоном · только фотографии</i></span>
+          <span><b><span data-i18n="Водяной знак" data-i18n-en="Watermark">Водяной знак</span></b><i><span data-i18n="PNG с прозрачным фоном · только фотографии" data-i18n-en="Transparent PNG · photos only">PNG с прозрачным фоном · только фотографии</span></i></span>
           <input type="checkbox" data-field="watermark">
         </label>
-        <label class="label" for="watermarkPosition">Положение логотипа</label>
+        <label class="label" for="watermarkPosition"><span data-i18n="Положение логотипа" data-i18n-en="Logo position">Положение логотипа</span></label>
         <div class="select-wrap"><select id="watermarkPosition" data-field="watermark_position">
-          <option value="top-left">Слева сверху</option>
-          <option value="top-right">Справа сверху</option>
-          <option value="center">По центру</option>
-          <option value="bottom-left">Слева снизу</option>
-          <option value="bottom-right">Справа снизу</option>
+          <option value="top-left" data-i18n="Слева сверху" data-i18n-en="Top left">Слева сверху</option>
+          <option value="top-right" data-i18n="Справа сверху" data-i18n-en="Top right">Справа сверху</option>
+          <option value="center" data-i18n="По центру" data-i18n-en="Centre">По центру</option>
+          <option value="bottom-left" data-i18n="Слева снизу" data-i18n-en="Bottom left">Слева снизу</option>
+          <option value="bottom-right" data-i18n="Справа снизу" data-i18n-en="Bottom right">Справа снизу</option>
         </select></div>
         <label class="upload-control" for="logoUpload">
           <input id="logoUpload" type="file" accept="image/png,.png">
-          <span>Выбрать логотип PNG</span><small>До 4 МБ · прозрачный фон</small>
+          <span><span data-i18n="Выбрать логотип PNG" data-i18n-en="Choose PNG logo">Выбрать логотип PNG</span></span><small><span data-i18n="До 4 МБ · прозрачный фон" data-i18n-en="Up to 4 MB · transparent background">До 4 МБ · прозрачный фон</span></small>
         </label>
         <p id="logoStatus" class="hint" aria-live="polite"></p>
-        <p class="hint">Прозрачный фон сохраняется. Логотип пропорционально уменьшается и размещается с отступом от края. Белый фон исходного файла автоматически не удаляется.</p>
+        <p class="hint"><span data-i18n="Прозрачный фон сохраняется. Логотип пропорционально уменьшается и размещается с отступом от края. Белый фон исходного файла автоматически не удаляется." data-i18n-en="Transparency is preserved. The logo is scaled proportionally and placed with a margin. A white background in the original file is not removed automatically.">Прозрачный фон сохраняется. Логотип пропорционально уменьшается и размещается с отступом от края. Белый фон исходного файла автоматически не удаляется.</span></p>
       </div>
     </details>
 
     <details class="card group">
-      <summary><span>Ключ Gemini</span><svg class="ic chev"><use href="#i-back"/></svg></summary>
+      <summary><span><span data-i18n="Дополнительно · свой ключ ИИ" data-i18n-en="Advanced · your own AI key">Дополнительно · свой ключ ИИ</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary>
       <div class="body">
-        <p class="hint">Сначала используется ваш ключ. Если он недоступен или исчерпал квоту, запрос перейдёт на ключ сервиса. Пусто — всегда используется ключ сервиса. Лимиты публикаций тарифа сохраняются.</p>
-        <input type="password" data-field="gemini_key" placeholder="Ключ Google AI Studio: AQ.… или AIza…">
-        <button class="accent wide" data-save="gemini_key">Сохранить ключ</button>
+        <p class="hint"><span data-i18n="Сначала используется ваш ключ. Если он недоступен или исчерпал квоту, запрос перейдёт на ключ сервиса. Пусто — всегда используется ключ сервиса. Лимиты публикаций тарифа сохраняются." data-i18n-en="Your key is used first. If unavailable or out of quota, the service key is used instead. Leave blank to always use the service key. Your plan’s posting limits still apply.">Сначала используется ваш ключ. Если он недоступен или исчерпал квоту, запрос перейдёт на ключ сервиса. Пусто — всегда используется ключ сервиса. Лимиты публикаций тарифа сохраняются.</span></p>
+        <input type="password" data-field="gemini_key" placeholder="Ключ Google AI Studio: AQ.… или AIza…" data-i18n-placeholder="Ключ Google AI Studio: AQ.… или AIza…" data-i18n-placeholder-en="Google AI Studio key: AQ.… or AIza…">
+        <button class="accent wide" data-save="gemini_key"><span data-i18n="Сохранить ключ" data-i18n-en="Save key">Сохранить ключ</span></button>
       </div>
     </details>
 
-    <button id="replayTour" class="tour-entry">
+    <button id="replayTour" class="tour-entry" data-tutorial>
       <span class="tour-entry-icon" aria-hidden="true"><svg class="ic"><use href="#i-bolt"/></svg></span>
-      <span class="tour-entry-copy"><b>Как работает Нейропостинг</b><small>Короткое знакомство · 6 слайдов</small></span>
+      <span class="tour-entry-copy"><b data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</b><small data-i18n="Полное обучение · 8 тем" data-i18n-en="Complete guide · 8 topics">Полное обучение · 8 тем</small></span>
       <svg class="ic tour-entry-arrow" aria-hidden="true"><use href="#i-back"/></svg>
     </button>
 
-    <div class="card group plan" id="planCard"></div>
+
 
     <button id="deleteChannel" class="danger wide">
-      <svg class="ic"><use href="#i-trash"/></svg> Удалить канал из панели
+      <svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="Удалить канал из панели" data-i18n-en="Remove channel from dashboard">Удалить канал из панели</span>
     </button>
+  </section>
+
+  <section id="page-billing" class="page" hidden>
+    <button id="billingBack" class="back-link"><svg class="ic"><use href="#i-back"/></svg> <span data-i18n="Назад" data-i18n-en="Back">Назад</span></button>
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ВАШ АККАУНТ" data-i18n-en="YOUR ACCOUNT">ВАШ АККАУНТ</span></span><h2><span data-i18n="Мой тариф" data-i18n-en="My plan">Мой тариф</span></h2><p class="muted"><span data-i18n="Подключённый доступ и оставшийся лимит." data-i18n-en="Your current access and remaining quota.">Подключённый доступ и оставшийся лимит.</span></p></div>
+    <div id="planCard" class="card current-plan" aria-live="polite"></div>
+    <p class="hint"><span data-i18n="Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве." data-i18n-en="Your daily AI post limit is shared across all channels and resets at 00:00 UTC (03:00 Moscow time).">Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве.</span></p>
+    <p id="billingAvailability" class="notice" role="status" hidden></p>
+    <button id="billingRefresh" class="ghost wide"><span data-i18n="Обновить доступ" data-i18n-en="Refresh plan">Обновить доступ</span> <svg class="ic"><use href="#i-refresh"/></svg></button>
   </section>
 
   <!-- админ -->
   <section id="page-admin" class="page" hidden>
     <div class="pagehead">
       <button id="closeAdmin" class="ghost square"><svg class="ic"><use href="#i-back"/></svg></button>
-      <h2>Админ-панель</h2>
+      <h2><span data-i18n="Админ-панель" data-i18n-en="Admin dashboard">Админ-панель</span></h2>
     </div>
     <div id="adminTotals" class="grid"></div>
 
-    <h3 class="section">Сервер и обработка</h3>
-    <p id="adminUpdated" class="hint" aria-live="polite">Загрузка показателей…</p>
+    <h3 class="section"><span data-i18n="Сервер и обработка" data-i18n-en="Server and processing">Сервер и обработка</span></h3>
+    <p id="adminUpdated" class="hint" aria-live="polite"><span data-i18n="Загрузка показателей…" data-i18n-en="Loading metrics…">Загрузка показателей…</span></p>
     <div id="system" class="card system"></div>
-    <h3 class="section">Нагрузка и очередь · все каналы</h3>
+    <h3 class="section"><span data-i18n="Нагрузка и очередь · все каналы" data-i18n-en="Load and queue · all channels">Нагрузка и очередь · все каналы</span></h3>
     <div id="adminMonitoring" class="grid"></div>
-    <h3 class="section">Нагрузка Gemini API</h3>
-    <div id="apiLoad" class="card"><p class="hint">Загрузка показателей API…</p></div>
-    <details class="card group"><summary>Проверка всех каналов</summary><div id="channelAudit" class="body"></div></details>
-    <p class="hint">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</p>
+    <h3 class="section"><span data-i18n="Нагрузка Gemini API" data-i18n-en="Gemini API usage">Нагрузка Gemini API</span></h3>
+    <div id="apiLoad" class="card"><p class="hint"><span data-i18n="Загрузка показателей API…" data-i18n-en="Loading API metrics…">Загрузка показателей API…</span></p></div>
+    <details class="card group"><summary><span data-i18n="Проверка всех каналов" data-i18n-en="All channel status">Проверка всех каналов</span></summary><div id="channelAudit" class="body"></div></details>
+    <p class="hint"><span data-i18n="Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно." data-i18n-en="Metrics refresh every 15 seconds while this panel is open. CPU, memory and disk describe the server; application memory is shown separately.">Показатели обновляются каждые 15 секунд, пока открыта панель. CPU, память и диск относятся к среде сервера; память приложения показана отдельно.</span></p>
 
-    <details class="card group"><summary>Журнал событий <svg class="ic chev" aria-hidden="true"><use href="#i-back"/></svg></summary>
+    <details class="card group"><summary><span data-i18n="Журнал событий" data-i18n-en="Event log">Журнал событий</span> <svg class="ic chev" aria-hidden="true"><use href="#i-back"/></svg></summary>
       <div id="adminEvents" class="body"></div>
     </details>
-    <h3 class="section">Ключи Gemini</h3>
+    <h3 class="section"><span data-i18n="Ключи Gemini" data-i18n-en="Gemini keys">Ключи Gemini</span></h3>
     <div class="card admin-key-form">
-      <p class="hint">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</p>
-      <label for="apiKeyInput" class="label">Новые ключи</label>
-      <textarea id="apiKeyInput" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="AQ.… или AIza… — каждый ключ с новой строки"></textarea>
+      <p class="hint"><span data-i18n="До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота." data-i18n-en="Up to 20 keys, one per line. On failure, the next available key is used. Keys in the same Google project share a quota.">До 20 ключей, каждый с новой строки. При сбое используется следующий доступный ключ. У ключей одного Google-проекта общая квота.</span></p>
+      <label for="apiKeyInput" class="label"><span data-i18n="Новые ключи" data-i18n-en="New keys">Новые ключи</span></label>
+      <textarea id="apiKeyInput" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="AQ.… или AIza… — каждый ключ с новой строки" data-i18n-placeholder="AQ.… или AIza… — каждый ключ с новой строки" data-i18n-placeholder-en="AQ.… or AIza… — one key per line"></textarea>
       <div class="form-actions">
-      <button id="apiKeyAdd" class="accent wide">Сохранить ключи</button>
-      <button id="apiKeyRefresh" class="ghost wide">Обновить статусы</button>
+      <button id="apiKeyAdd" class="accent wide"><span data-i18n="Сохранить ключи" data-i18n-en="Save keys">Сохранить ключи</span></button>
+      <button id="apiKeyRefresh" class="ghost wide"><span data-i18n="Обновить статусы" data-i18n-en="Refresh status">Обновить статусы</span></button>
       </div>
       <p id="apiKeyStatus" class="hint" aria-live="polite"></p>
       <div id="apiKeyList"></div>
     </div>
-    <h3 class="section">Промокоды</h3>
+    <h3 class="section"><span data-i18n="Промокоды" data-i18n-en="Access codes">Промокоды</span></h3>
     <div class="card">
       <div class="promo-form">
         <span class="select-wrap"><select id="promoPlan"></select></span>
-        <input type="number" id="promoCount" value="5" min="1" max="50" class="num wide-num" title="сколько кодов">
+        <input type="number" id="promoCount" value="5" min="1" max="50" class="num wide-num" title="сколько кодов" data-i18n-title="сколько кодов" data-i18n-title-en="number of codes">
       </div>
-      <input type="text" id="promoNote" placeholder="комментарий: кому и за что (необязательно)">
+      <input type="text" id="promoNote" placeholder="комментарий: кому и за что (необязательно)" data-i18n-placeholder="комментарий: кому и за что (необязательно)" data-i18n-placeholder-en="note: recipient and reason (optional)">
       <div class="access-grid">
-        <label>Постов в день<input id="promoDaily" type="number" min="0" max="100000" value="500"></label>
-        <label>Каналов<input id="promoChannels" type="number" min="1" max="120" value="3"></label>
-        <label>Дней доступа<input id="promoDays" type="number" min="1" max="3650" value="30"></label>
-        <label>Активировать за дней<input id="promoExpiry" type="number" min="1" max="3650" placeholder="Без срока"></label>
+        <label><span data-i18n="Постов в день" data-i18n-en="Posts per day">Постов в день</span><input id="promoDaily" type="number" min="0" max="100000" value="500"></label>
+        <label><span data-i18n="Каналов" data-i18n-en="Channels">Каналов</span><input id="promoChannels" type="number" min="1" max="120" value="3"></label>
+        <label><span data-i18n="Дней доступа" data-i18n-en="Days of access">Дней доступа</span><input id="promoDays" type="number" min="1" max="3650" value="30"></label>
+        <label><span data-i18n="Активировать за дней" data-i18n-en="Days to activate">Активировать за дней</span><input id="promoExpiry" type="number" min="1" max="3650" placeholder="Без срока" data-i18n-placeholder="Без срока" data-i18n-placeholder-en="No deadline"></label>
       </div>
-      <label>Telegram ID клиента (необязательно)<input id="promoRecipient" type="text" inputmode="numeric" placeholder="Любой клиент"></label>
-      <p class="hint">Ключ одноразовый. Дни доступа прибавляются при активации. Срок активации отсчитывается от выпуска.</p>
-      <button id="promoCreate" class="accent wide">Выпустить коды</button>
+      <label><span data-i18n="Telegram ID клиента (необязательно)" data-i18n-en="Customer’s Telegram ID (optional)">Telegram ID клиента (необязательно)</span><input id="promoRecipient" type="text" inputmode="numeric" placeholder="Любой клиент" data-i18n-placeholder="Любой клиент" data-i18n-placeholder-en="Any customer"></label>
+      <p class="hint"><span data-i18n="Ключ одноразовый. Дни доступа прибавляются при активации. Срок активации отсчитывается от выпуска." data-i18n-en="Codes can be used once. Access days are added on activation. The activation deadline starts when the code is issued.">Ключ одноразовый. Дни доступа прибавляются при активации. Срок активации отсчитывается от выпуска.</span></p>
+      <button id="promoCreate" class="accent wide"><span data-i18n="Выпустить коды" data-i18n-en="Issue codes">Выпустить коды</span></button>
     </div>
     <div id="promoList"></div>
 
-    <h3 class="section">Пользователи</h3>
+    <h3 class="section"><span data-i18n="Пользователи" data-i18n-en="Users">Пользователи</span></h3>
     <div id="adminUsers"></div>
 
-    <h3 class="section">Каналы</h3>
+    <h3 class="section"><span data-i18n="Каналы" data-i18n-en="Channels">Каналы</span></h3>
     <div id="adminChannels"></div>
   </section>
 
-  <nav class="nav" id="nav">
-    <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span>Главная</span></button>
-    <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span>Посты</span><i id="feedBadge" class="badge" hidden></i></button>
-    <button data-page="ads"><svg class="ic"><use href="#i-ads"/></svg><span>Реклама</span><i id="adsBadge" class="badge" hidden></i></button>
-    <button data-page="sources"><svg class="ic"><use href="#i-sources"/></svg><span>Источники</span></button>
-    <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span>Настройки</span></button>
+  <nav class="nav" id="nav" aria-label="Основная навигация" data-i18n-aria-label="Основная навигация" data-i18n-aria-label-en="Main navigation">
+    <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span><span data-i18n="Главная" data-i18n-en="Home">Главная</span></span></button>
+    <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span><span data-i18n="Посты" data-i18n-en="Posts">Посты</span></span><i id="feedBadge" class="badge" hidden></i></button>
+    <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></span></button>
   </nav>
 </main>
 

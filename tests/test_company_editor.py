@@ -5,10 +5,15 @@ import httpx
 import pytest
 
 from app.ai import gemini
-from app.core import business
+from app.core import business, features
 
 PROFILE = {'name':'DOBRA','services':'Мультимедиа','website':'https://example.org','facts':'Частный текст досье'}
 TEXT = 'Компания занимается мультимедиа для переговорных и учебных пространств.'
+
+
+@pytest.fixture(autouse=True)
+def enabled_business(monkeypatch):
+    monkeypatch.setattr(features, 'BUSINESS_MODE_ENABLED', True)
 
 
 @pytest.mark.asyncio

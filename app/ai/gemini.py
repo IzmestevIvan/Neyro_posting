@@ -26,11 +26,34 @@ log = logging.getLogger("ai")
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 COOLDOWN_KEY = "main_model_cooldown_until"
 COOLDOWN_MINUTES = 30
+# Per credential/model: a successful backup must not erase the failed primary's pause.
+# Bounded in-memory state; no credentials or private prompts are stored here.
+_model_pauses: dict[tuple[str, str, bool], float] = {}
+
+
+def _pause_model(route_key, detail):
+    seconds = 120 if 'HTTP 429' in detail else 30 if re.search(r'HTTP 5\d\d', detail) else 0
+    if not seconds:
+        return
+    now = time.monotonic()
+    for key, until in list(_model_pauses.items()):
+        if until <= now:
+            del _model_pauses[key]
+    if len(_model_pauses) >= 256:
+        del _model_pauses[min(_model_pauses, key=_model_pauses.get)]
+    _model_pauses[route_key] = now + seconds
+
+
 JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
 class AIError(RuntimeError):
     pass
+
+
+class BusyError(AIError):
+    """No request was made: routes are briefly occupied or paused."""
+    retry_after = 30
 
 
 class NoKeyError(AIError):
@@ -189,7 +212,8 @@ async def generate(
     async with httpx.AsyncClient() as client:
         for route in routes:
             current_key, key_id = route['secret'], route['id']
-            lock = runtime.channel_lock(('gemini-key', hashlib.sha256(current_key.encode()).hexdigest()))
+            key_digest = hashlib.sha256(current_key.encode()).hexdigest()
+            lock = runtime.channel_lock(('gemini-key', key_digest))
             # Busy keys are skipped so one slow account cannot hold up all channels.
             if lock.locked():
                 continue
@@ -199,6 +223,9 @@ async def generate(
                 models = list(chain)
                 if current_key == shared and await cooldown_left() and len(models) > 1:
                     models = [m for m in models if m != GEMINI_MODEL_MAIN] + [GEMINI_MODEL_MAIN]
+                models = [m for m in models if _model_pauses.get((key_digest, m, search), 0) <= time.monotonic()]
+                if not models:
+                    continue
                 operational_failure = False
                 route_errors = []
                 for attempt, name in enumerate(models):
@@ -211,6 +238,7 @@ async def generate(
                                 result = await _call(client, name, current_key, prompt, system, temperature, as_json, search=True)
                             else:
                                 result = await _call(client, name, current_key, prompt, system, temperature, as_json)
+                        _model_pauses.pop((key_digest, name, search), None)
                         if key_id is not None:
                             await key_pool.succeeded(key_id)
                         if errors:
@@ -219,6 +247,7 @@ async def generate(
                         return result
                     except (AIError, httpx.RequestError, TimeoutError) as exc:
                         detail = str(exc) or type(exc).__name__
+                        _pause_model((key_digest, name, search), detail)
                         errors.append(detail)
                         route_errors.append(detail)
                         log.warning('gemini call failed (%s): %s', route['label'], detail)
@@ -233,7 +262,9 @@ async def generate(
                     break  # Content/safety refusal is not a reason to switch accounts.
                 if key_id is not None and not (search and all('HTTP 400' in e for e in route_errors)):
                     await key_pool.failed(key_id, '; '.join(route_errors))
-    raise AIError('; '.join(errors) or 'Все доступные ключи заняты. Материал ожидает повторной обработки.')
+    if not errors:
+        raise BusyError('Доступные маршруты ИИ заняты или ненадолго приостановлены')
+    raise AIError('; '.join(errors))
 
 
 async def generate_json(prompt: str, **kwargs) -> dict:

@@ -7,13 +7,14 @@ from fastapi import HTTPException
 
 from app.ai import gemini
 from app.api.routes import _clean_settings, update_channel, business_draft, post_action
-from app.core import business, publisher, scheduler
+from app.core import business, features, publisher, scheduler
 from tests.test_pipeline_db import FakeBot, make_post
 
 TEXT = 'Перед оснащением переговорной определите число участников, сценарии встреч и требования к звуку. Это поможет составить понятное техническое задание.'
 
 @pytest.fixture(autouse=True)
 def offline_research(monkeypatch):
+    monkeypatch.setattr(features, 'BUSINESS_MODE_ENABLED', True)
     monkeypatch.setattr(business, 'research_company', AsyncMock(return_value={}))
 
 

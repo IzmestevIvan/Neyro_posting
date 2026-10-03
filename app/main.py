@@ -60,11 +60,15 @@ async def run_service(bot, reporter) -> None:
 
     model_check = asyncio.create_task(report_models())
 
-    tasks = [*scheduler.start(bot), asyncio.create_task(check_guard()), asyncio.create_task(broadcasts.run(bot)), reporter]
+    from app.billing.service import run as billing_run
+    tasks = [*scheduler.start(bot), asyncio.create_task(check_guard()), asyncio.create_task(broadcasts.run(bot)),
+             asyncio.create_task(billing_run()), reporter]
     application = create_app(bot, me.username)
     application.state.background_tasks = tasks
     server = uvicorn.Server(
-        uvicorn.Config(application, host=HOST, port=PORT, log_level="warning", limit_concurrency=100)
+        uvicorn.Config(application, host=HOST, port=PORT, log_level="warning",
+                       limit_concurrency=100, backlog=128, timeout_keep_alive=5,
+                       forwarded_allow_ips=os.getenv('FORWARDED_ALLOW_IPS', '127.0.0.1'))
     )
     # Uvicorn config uses its own non-propagating logger.
     logging.getLogger('uvicorn').propagate = True

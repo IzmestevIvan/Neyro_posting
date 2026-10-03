@@ -9,7 +9,7 @@ import httpx
 
 from app import db
 from app.ai import gemini
-from app.core import access, runtime, business_media
+from app.core import access, runtime, business_media, features
 from app.core.filters import fingerprint, find_duplicate
 from app.sources import web
 from app.sources.safe_http import UnsafeURL
@@ -67,6 +67,7 @@ def clean_profile(value):
 
 async def research_company(channel, profile):
     """Bounded public search, cache per identity; no private dossier in search query."""
+    features.require_business_mode()
     identity = {k: profile.get(k,'') for k in ('name','website','geography','socials')}
     if not identity['website'] and not identity['socials']:
         return {'warning':'Для поиска именно вашей компании добавьте сайт или публичную соцсеть в досье.'}
@@ -96,6 +97,7 @@ async def research_company(channel, profile):
 
 
 async def draft_text(channel, brief='', article_url='', *, research_out=None):
+    features.require_business_mode()
     brief, article_url = brief.strip(), article_url.strip()
     profile = json.loads(channel.get('business_profile') or '{}')
     if not profile.get('name') or not profile.get('services'):
@@ -170,6 +172,7 @@ async def draft_text(channel, brief='', article_url='', *, research_out=None):
 
 
 async def generate(channel_id, brief='', article_url='', *, automatic=False):
+    features.require_business_mode()
     if not isinstance(brief, str) or len(brief) > 4000 or not isinstance(article_url, str) or len(article_url) > 1000:
         raise ValueError('Материал: до 4000 символов; ссылка: до 1000')
     lock = runtime.channel_lock(channel_id)
@@ -217,6 +220,7 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
                 channel_id, brief, text, url, review, fp,json.dumps({'research':research},ensure_ascii=False),json.dumps([photo] if photo else []))
             await conn.execute('UPDATE channels SET business_next_at=$1 WHERE id=$2', db.utcnow()+timedelta(days=1), channel_id)
         try:
+            await db.set_kv(f'business_error:{channel_id}', None)
             await db.bump_stat(channel_id, db.utcnow().date(), 'ai_requests')
         except Exception:
             # The draft is already committed; don't report failure and invite duplicates.
@@ -225,6 +229,8 @@ async def generate(channel_id, brief='', article_url='', *, automatic=False):
 
 
 async def propose_due():
+    if not features.BUSINESS_MODE_ENABLED:
+        return
     rows = await db.fetch_all("SELECT id FROM channels c WHERE business_mode=1 AND business_auto=1 AND paused=0 "
         "AND (business_next_at IS NULL OR business_next_at<=now()) "
         "AND (SELECT count(*) FROM posts p WHERE p.channel_id=c.id AND p.business_generated=1 AND p.status='pending')<5 "
@@ -232,12 +238,21 @@ async def propose_due():
     for row in rows:
         try:
             await generate(row['id'], automatic=True)
-        except Exception:
-            await db.execute('UPDATE channels SET business_next_at=? WHERE id=?', (db.utcnow()+timedelta(hours=1),row['id']))
+        except Exception as exc:
+            if isinstance(exc, gemini.BusyError):
+                retry_seconds = 60
+                reason = 'Сервис подготовки занят. Повтор при ближайшей проверке, в течение пяти минут.'
+            else:
+                retry_seconds = 3600
+                reason = str(exc)[:500] if isinstance(exc, ValueError) else 'Сервис подготовки временно недоступен. Черновик не создан; следующая попытка через час.'
+            await db.set_kv(f'business_error:{row["id"]}', {'reason': reason, 'at': db.utcnow().isoformat()})
+            await db.execute('UPDATE channels SET business_next_at=? WHERE id=?', (db.utcnow()+timedelta(seconds=retry_seconds),row['id']))
             log.exception('Не удалось подготовить бизнес-черновик: канал %s', row['id'])
 
 
 async def proposal_loop():
+    if not features.BUSINESS_MODE_ENABLED:
+        return
     while True:
         try:
             await propose_due()

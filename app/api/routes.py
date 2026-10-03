@@ -27,7 +27,7 @@ from app.config import (
     PACE_MODES,
     TIMEZONES,
 )
-from app.core import promo, publisher, scheduler, watermark, runtime, business, business_media
+from app.core import promo, publisher, scheduler, watermark, runtime, business, business_media, features
 from app.sources import rss, telegram_web
 
 router = APIRouter(prefix="/api")
@@ -44,11 +44,19 @@ QUALITY = {"fast", "balanced", "super"}
 
 def public_channel(channel: dict) -> dict:
     return {**{k: v for k, v in channel.items() if k not in ('gemini_key','logo_path','voice_sample')},
+            'business_unavailable': features.business_mode_unavailable(channel),
             'gemini_key_configured': bool(channel.get('gemini_key')),
             'logo_configured': bool(channel.get('logo_path'))}
 
 
+def _require_business_available(channel=None, post=None) -> None:
+    if features.business_mode_unavailable(channel, post):
+        raise HTTPException(409, features.BUSINESS_MODE_UNAVAILABLE)
+
+
 def _clean_settings(payload: dict) -> dict:
+    if not features.BUSINESS_MODE_ENABLED and set(payload) & {'business_mode', 'business_auto', 'business_profile'}:
+        raise HTTPException(409, features.BUSINESS_MODE_UNAVAILABLE)
     out: dict[str, Any] = {}
     for key, value in payload.items():
         if key == 'business_profile':
@@ -112,6 +120,7 @@ async def bootstrap(request: Request, user: dict = Depends(current_user)) -> dic
         "SELECT * FROM channels WHERE owner_id = ? ORDER BY id", (user["tg_id"],)
     )
     return {
+        "features": {"business_mode": features.BUSINESS_MODE_ENABLED},
         "bot_username": request.app.state.bot_username,
         "support_username": await db.get_kv('support_username'),
         "user": {
@@ -193,7 +202,7 @@ async def add_channel(
 
 @router.delete("/channels/{channel_id}")
 async def delete_channel(channel_id: int, user: dict = Depends(current_user)) -> dict:
-    await owned_channel(channel_id, user)
+    _require_business_available(await owned_channel(channel_id, user))
     await db.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
     return {"ok": True}
 
@@ -203,6 +212,7 @@ async def update_channel(
     channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)
 ) -> dict:
     channel = await owned_channel(channel_id, user)
+    _require_business_available(channel)
     fields = _clean_settings(payload)
 
     if fields.get("channel_voice") and not channel["voice_sample"]:
@@ -215,6 +225,7 @@ async def update_channel(
         fresh = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel_id)
         if not fresh:
             raise HTTPException(404, 'Канал удалён')
+        _require_business_available(fresh)
         if fields.get('business_mode', fresh['business_mode']):
             fields.update(autopost=0, digest_enabled=0)
         if fields.get('business_auto', fresh['business_auto']):
@@ -296,8 +307,13 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
     blockers = []
     if channel['paused']:
         blockers.append('Канал на паузе — снимите паузу в настройках.')
-    if channel.get('business_mode'):
+    if features.business_mode_unavailable(channel):
+        blockers.append(features.BUSINESS_MODE_UNAVAILABLE)
+    elif channel.get('business_mode'):
         blockers.append('Режим бизнеса: публикация только после вашего согласования во вкладке «Посты».')
+        business_error = await db.get_kv(f'business_error:{channel_id}')
+        if isinstance(business_error, dict) and business_error.get('reason'):
+            blockers.append('Последняя подготовка: ' + business_error['reason'])
         if not channel.get('business_auto'):
             blockers.append('Ежедневная подготовка выключена. Подготовьте пост вручную или включите предложения в досье.')
     else:
@@ -364,7 +380,7 @@ async def _system_health() -> dict:
 
 @router.post('/channels/{channel_id}/logo')
 async def upload_logo(channel_id: int, request: Request, user: dict = Depends(active_user)) -> dict:
-    await owned_channel(channel_id, user)
+    _require_business_available(await owned_channel(channel_id, user))
     if request.headers.get('content-type', '').split(';')[0] != 'image/png':
         raise HTTPException(422, 'Загрузите PNG-файл, чтобы сохранить прозрачность')
     content = await request.body()
@@ -405,7 +421,8 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
         "(SELECT count(*) FROM posts p WHERE p.channel_id=c.id AND p.status IN ('uncertain','partial')) AS uncertain "
         "FROM channels c ORDER BY c.id")
     for c in channels:
-        if c['paused']: status = 'На паузе'
+        if features.business_mode_unavailable(c): status = 'Режим бизнеса временно недоступен'
+        elif c['paused']: status = 'На паузе'
         elif c['business_mode']: status = 'Бизнес: требуется согласование'
         elif not c['autopost']: status = 'Автопостинг выключен'
         elif c['uncertain']: status = 'Требуется сверка предыдущей отправки'
@@ -426,13 +443,14 @@ async def admin_monitoring(user: dict = Depends(current_user)) -> dict:
 
 @router.get("/channels/{channel_id}/feed")
 async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
-    await owned_channel(channel_id, user)
+    channel = await owned_channel(channel_id, user)
     rows = await db.fetch_all(
-        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, reason, created_at, business_draft "
+        "SELECT id, url, source_title, text_out, raw_text, media, fact_check, reason, created_at, business_draft, business_generated "
         "FROM posts WHERE channel_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 30",
         (channel_id,),
     )
     for row in rows:
+        row['business_unavailable'] = features.business_mode_unavailable(channel, row)
         row["media"] = json.loads(row["media"] or "[]")
         row['media_revision'] = business_media.revision(row['media'])
         row["fact_check"] = json.loads(row["fact_check"]) if row["fact_check"] else None
@@ -441,15 +459,16 @@ async def channel_feed(channel_id: int, user: dict = Depends(active_user)) -> li
 
 @router.get("/channels/{channel_id}/history")
 async def channel_history(channel_id: int, user: dict = Depends(active_user)) -> list[dict]:
-    await owned_channel(channel_id, user)
+    channel = await owned_channel(channel_id, user)
     rows = await db.fetch_all(
         "SELECT id, status, reason, source_title, substr(COALESCE(text_out, raw_text), 1, 200) AS preview, "
-        "created_at, published_at, (SELECT receipts FROM delivery_attempts d WHERE d.post_id=posts.id ORDER BY d.id DESC LIMIT 1) AS delivery_receipts FROM posts WHERE channel_id = ? AND status != 'pending' "
+        "created_at, published_at, business_draft, business_generated, (SELECT receipts FROM delivery_attempts d WHERE d.post_id=posts.id ORDER BY d.id DESC LIMIT 1) AS delivery_receipts FROM posts WHERE channel_id = ? AND status != 'pending' "
         "ORDER BY id DESC LIMIT 50",
         (channel_id,),
     )
 
     for row in rows:
+        row['business_unavailable'] = features.business_mode_unavailable(channel, row)
         value = row['delivery_receipts']
         row['delivery_receipts'] = json.loads(value) if isinstance(value, str) else (value or [])
     return rows
@@ -463,6 +482,7 @@ async def post_action(
     if not post:
         raise HTTPException(404, "пост не найден")
     channel = await owned_channel(post["channel_id"], user)
+    _require_business_available(channel, post)
     bot = request.app.state.bot
 
     if action in ('photo', 'remove_photo') and post.get('business_draft'):
@@ -575,6 +595,7 @@ async def publish_now(
     channel_id: int, request: Request, user: dict = Depends(active_user)
 ) -> dict:
     channel = await owned_channel(channel_id, user)
+    _require_business_available(channel)
     if channel.get('business_mode'):
         raise HTTPException(409, 'В бизнес-режиме сначала подготовьте и согласуйте черновик во вкладке «Посты»')
     if await publisher.quota_left(channel["owner_id"]) <= 0:
@@ -595,6 +616,8 @@ async def publish_now(
 @router.post('/channels/{channel_id}/business/draft')
 async def business_draft(channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)) -> dict:
     await owned_channel(channel_id, user)
+    if not features.BUSINESS_MODE_ENABLED:
+        raise HTTPException(409, features.BUSINESS_MODE_UNAVAILABLE)
     if set(payload) - {'brief', 'url'}:
         raise HTTPException(422, 'Недопустимые поля запроса')
     try:
@@ -618,7 +641,7 @@ async def list_sources(channel_id: int, user: dict = Depends(active_user)) -> li
 async def add_source(
     channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)
 ) -> dict:
-    await owned_channel(channel_id, user)
+    _require_business_available(await owned_channel(channel_id, user))
     ref = str(payload.get("ref", "")).strip()
     if not ref:
         raise HTTPException(400, "укажите канал или ссылку на ленту")
@@ -657,6 +680,7 @@ async def add_source(
 @router.post("/channels/{channel_id}/sources/copy")
 async def copy_channel_sources(channel_id: int, payload: dict = Body(...), user: dict = Depends(active_user)) -> dict:
     from app.sources.manage import copy_sources
+    _require_business_available(await owned_channel(channel_id, user))
     origin = payload.get("from_channel_id")
     ids = payload.get("source_ids")
     if type(origin) is not int or not isinstance(ids, list):
@@ -674,7 +698,7 @@ async def delete_source(source_id: int, user: dict = Depends(active_user)) -> di
     source = await db.fetch_one("SELECT * FROM sources WHERE id = ?", (source_id,))
     if not source:
         raise HTTPException(404, "источник не найден")
-    await owned_channel(source["channel_id"], user)
+    _require_business_available(await owned_channel(source["channel_id"], user))
     await db.execute("DELETE FROM sources WHERE id = ?", (source_id,))
     return {"ok": True}
 
@@ -703,7 +727,7 @@ async def set_ad_status(ad_id: int, status: str, user: dict = Depends(active_use
     offer = await db.fetch_one("SELECT * FROM ad_offers WHERE id = ?", (ad_id,))
     if not offer:
         raise HTTPException(404, "предложение не найдено")
-    await owned_channel(offer["channel_id"], user)
+    _require_business_available(await owned_channel(offer["channel_id"], user))
     await db.execute("UPDATE ad_offers SET status = ? WHERE id = ?", (status, ad_id))
     return {"ok": True}
 
@@ -853,6 +877,13 @@ async def admin_update_user(
         target = await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1 FOR UPDATE', tg_id)
         if not target:
             raise HTTPException(404,'Клиент не найден')
+        if set(payload)-{'blocked','max_channels'}:
+            if await conn.fetchval("SELECT 1 FROM billing_orders WHERE user_id=$1 AND status IN ('creating','pending','review')",tg_id) or await conn.fetchval('SELECT 1 FROM billing_periods WHERE user_id=$1 AND NOT revoked AND ends_at>now()',tg_id):
+                raise HTTPException(409,'Параметры оплаченной подписки изменяются через расчёт тарифа')
+            from app.billing.service import sync_entitlement
+            await sync_entitlement(conn,tg_id)
+            await conn.execute('UPDATE billing_accounts SET version=version+1 WHERE user_id=$1',tg_id)
+            target=await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1',tg_id)
         if payload.get('extend_days'):
             fields['access_until'] = max(target['access_until'] or db.utcnow(),db.utcnow()) + timedelta(days=payload['extend_days'])
         if 'daily_limit' in payload or 'max_channels' in payload:

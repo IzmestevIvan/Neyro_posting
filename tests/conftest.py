@@ -8,7 +8,7 @@ from tests.db_safety import validate_test_url
 TEST_URL = validate_test_url(os.getenv("TEST_DATABASE_URL", "postgresql://neyro:neyro@localhost:5432/neyro_test"))
 os.environ["DATABASE_URL"] = TEST_URL
 
-TABLES = ("broadcast_recipients", "broadcasts", "support_routes", "service_api_keys", "delivery_attempts", "posts", "ad_offers", "sources", "stats_daily", "channels", "promo_codes", "users", "kv")
+TABLES = ("web_login_challenges", "broadcast_recipients", "broadcasts", "support_routes", "service_api_keys", "delivery_attempts", "posts", "ad_offers", "sources", "stats_daily", "channels", "promo_codes", "users", "kv")
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +17,8 @@ def isolated_runtime(monkeypatch):
     from unittest.mock import AsyncMock
     from app.core import scheduler, runtime, rate_limit
     monkeypatch.setattr(scheduler, 'ADMIN_IDS', set())
+    from app.ai import gemini
+    gemini._model_pauses.clear()
     scheduler._alert_times.clear()
     scheduler._source_cache.clear()
     rate_limit._buckets.clear()

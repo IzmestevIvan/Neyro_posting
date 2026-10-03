@@ -9,6 +9,12 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     logging: *bounded-logs
+    mem_limit: 384m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - database
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-neyro}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нужно задать POSTGRES_PASSWORD в .env}
@@ -27,11 +33,27 @@ services:
     restart: unless-stopped
     logging: *bounded-logs
     init: true
+    mem_limit: 768m
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      ingress:
+        ipv4_address: 172.30.90.3
+      database: {}
+      app_outbound: {}
     stop_grace_period: 30s
-    env_file: .env
+    env_file: .app.env
     environment:
       APP_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-neyro}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-neyro}
+      # Only Caddy on the dedicated ingress network may supply client addresses.
+      FORWARDED_ALLOW_IPS: 172.30.90.2
+      DATABASE_URL: postgresql://${APP_DATABASE_USER:?нужна роль приложения}:${APP_DATABASE_PASSWORD:?нужен пароль приложения}@db:5432/${POSTGRES_DB:-neyro}
     volumes:
       - ./data:/app/data
     expose:
@@ -49,11 +71,23 @@ services:
     restart: unless-stopped
     logging: *bounded-logs
     init: true
+    mem_limit: 256m
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - database
+      - support_outbound
     env_file:
-      - .env
+      - .app.env
       - .support.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-neyro}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-neyro}
+      DATABASE_URL: postgresql://${APP_DATABASE_USER:?нужна роль приложения}:${APP_DATABASE_PASSWORD:?нужен пароль приложения}@db:5432/${POSTGRES_DB:-neyro}
     depends_on:
       app:
         condition: service_healthy
@@ -64,6 +98,14 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     logging: *bounded-logs
+    mem_limit: 192m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      ingress:
+        ipv4_address: 172.30.90.2
+      proxy_outbound: {}
     ports:
       - "80:80"
       - "443:443"
@@ -75,6 +117,18 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+
+networks:
+  ingress:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.90.0/28
+  database:
+    internal: true
+  app_outbound: {}
+  support_outbound: {}
+  proxy_outbound: {}
 
 volumes:
   pgdata:

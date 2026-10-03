@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Official multi-platform manifest digests checked on 2026-10-02.
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
+
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=2
+WORKDIR /build
+COPY waf/build/go.mod waf/build/go.sum ./
+RUN go mod download && go mod verify
+COPY waf/build/main.go ./
+RUN go build -mod=readonly -p 2 -trimpath \
+    -ldflags "-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.6-neyro-waf" \
+    -o /usr/bin/caddy .
+
+# The official 2.11.6 Docker tag was not published at preparation time. This
+# pinned image supplies certificates/directories only; its older Caddy binary
+# is REPLACED below by our pinned 2.11.6 + Coraza build.
+FROM caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+COPY waf/*.conf waf/*.caddy /etc/caddy/waf/
+ENV WAF_DIR=/etc/caddy/waf
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

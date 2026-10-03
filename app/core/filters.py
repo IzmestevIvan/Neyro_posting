@@ -44,7 +44,7 @@ SELF_PROMO_TAIL = re.compile(
 def normalize(text: str) -> str:
     text = URL.sub(" ", text)
     text = MENTION.sub(" ", text)
-    return " ".join(WORD.findall(text.lower()))
+    return " ".join(WORD.findall(text.lower().replace("ё", "е")))
 
 
 def tokens(text: str) -> set[str]:
@@ -57,7 +57,7 @@ def tokens(text: str) -> set[str]:
 
 
 def fingerprint(text: str) -> str:
-    return " ".join(sorted(tokens(text)))
+    return " ".join(sorted(tokens(strip_source_artifacts(text))))
 
 
 def jaccard(a: set[str], b: set[str]) -> float:
@@ -102,5 +102,7 @@ def strip_source_artifacts(text: str) -> str:
         if stripped == text.strip():
             break
         text = stripped
+    # Standalone photo/video credits are not part of the news event.
+    text = re.sub(r"(?im)^\s*(?:видео|фото|video|photo)\s*:[^\n]*$", "", text)
     lines = [EMOJI_TAIL.sub("", line).rstrip() for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()

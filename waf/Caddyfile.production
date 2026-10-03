@@ -1,0 +1,53 @@
+{
+	import /etc/caddy/waf/logging.caddy
+	servers {
+		max_header_size 32KB
+		timeouts {
+			read_header 5s
+			read_body 15s
+			idle 30s
+		}
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>uri delete
+				resp_headers delete
+			}
+		}
+	}
+
+	header {
+		# Telegram opens the panel inside its own WebView, so framing must stay allowed for
+		# telegram.org while everything else is locked down.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://oauth.telegram.org; frame-src https://oauth.telegram.org; frame-ancestors https://web.telegram.org https://telegram.org; base-uri 'none'; form-action 'none'"
+		-Server
+	}
+
+	# The panel is the only thing served; nothing here should ever be indexed.
+	handle /robots.txt {
+		respond "User-agent: *\nDisallow: /" 200
+	}
+
+	route {
+		import /etc/caddy/waf/handler.caddy
+		reverse_proxy app:8080 {
+			# Overwrite rather than trust forwarding headers supplied by visitors.
+			header_up X-Forwarded-For {remote_host}
+			transport http {
+				dial_timeout 3s
+			}
+		}
+	}
+}

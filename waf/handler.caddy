@@ -1,0 +1,28 @@
+# Import in an explicit route BEFORE reverse_proxy. WAF_DIR defaults to the
+# location installed in Dockerfile.caddy; tests override it for local binaries.
+# The outer Caddy body cap is independent of Coraza's rule-engine mode.
+@waf_logo {
+	method POST
+	path_regexp waf_logo ^/api/channels/[0-9]+/logo$
+	header_regexp Content-Type (?i)^image/png(?:;.*)?$
+}
+request_body @waf_logo {
+	max_size 4194304
+}
+@waf_regular not {
+	method POST
+	path_regexp waf_regular ^/api/channels/[0-9]+/logo$
+	header_regexp Content-Type (?i)^image/png(?:;.*)?$
+}
+request_body @waf_regular {
+	max_size 65536
+}
+coraza_waf {
+	load_owasp_crs
+	directives `
+		Include @coraza.conf-recommended
+		Include @crs-setup.conf.example
+		Include {$WAF_DIR:/etc/caddy/waf}/policy.conf
+		Include @owasp_crs/*.conf
+	`
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Pull encrypted NeuroPost backup and verify restore on reserve
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/neyro-pull-backup
+TimeoutStartSec=15min
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal

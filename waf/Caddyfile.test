@@ -1,0 +1,34 @@
+# Loopback-only integration fixture; never a production configuration.
+{
+	admin off
+	auto_https off
+	import logging.caddy
+	servers {
+		max_header_size 32KB
+		timeouts {
+			read_header 5s
+			read_body 15s
+			idle 15s
+		}
+	}
+}
+http://waf.test:{$WAF_TEST_PORT:18088} {
+	bind 127.0.0.1
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>uri delete
+				resp_headers delete
+			}
+		}
+	}
+	route {
+		import handler.caddy
+		reverse_proxy 127.0.0.1:{$WAF_BACKEND_PORT:18089} {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}

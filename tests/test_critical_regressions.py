@@ -61,7 +61,7 @@ async def test_code_suffix_is_not_ignored(store, owner):
 async def test_malformed_factcheck_blocks_publication(monkeypatch, check):
     from app.ai import pipeline, gemini
     async def generate_json(prompt, **kwargs):
-        if kwargs.get('allow_fallback') is False:
+        if kwargs.get('system') == pipeline.prompts.FACTCHECK_SYSTEM:
             return check
         return {'is_ad': False, 'is_offtopic': False, 'is_newsworthy': True}
     async def generate(*args, **kwargs):

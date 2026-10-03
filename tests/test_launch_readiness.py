@@ -147,7 +147,7 @@ async def test_120_channels_are_served_fairly_without_db_pool_starvation(store, 
 
 def test_public_channel_contains_no_key_or_internal_paths():
     public = routes.public_channel({'id':1,'gemini_key':'secret','logo_path':'/internal','voice_sample':'private'})
-    assert public == {'id':1,'gemini_key_configured':True,'logo_configured':True}
+    assert public == {'id':1,'gemini_key_configured':True,'logo_configured':True,'business_unavailable':False}
 
 
 @pytest.mark.asyncio

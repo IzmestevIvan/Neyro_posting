@@ -1,0 +1,11 @@
+# Candidate only: deploy after tests and resource measurements on the reserve.
+# Usage: docker compose -f docker-compose.yml -f compose.waf.yml ...
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    image: neyro-caddy:waf
+    mem_limit: 256m
+    volumes:
+      - ./waf/Caddyfile.production:/etc/caddy/Caddyfile:ro

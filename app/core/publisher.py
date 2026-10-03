@@ -9,6 +9,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import httpx
+
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.enums import ParseMode
@@ -20,7 +22,7 @@ from aiogram.types import (
 )
 
 from app import db
-from app.core import access, watermark, news_policy, runtime
+from app.core import access, watermark, news_policy, runtime, features
 from app.core.operations import channel_scope
 from app.sources import safe_http
 
@@ -80,6 +82,20 @@ def fits_caption(channel: dict, text: str) -> bool:
     return len(html.escape(text.strip()).encode('utf-16-le'))//2 + overhead <= CAPTION_LIMIT
 
 
+async def _fetch_media(url, **kwargs):
+    # A bounded retry before any Telegram send is safe even for albums.
+    for attempt in range(2):
+        try:
+            return await safe_http.fetch(url, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            if attempt or exc.response.status_code not in (500, 502, 503, 504):
+                raise
+        except (httpx.TransportError, TimeoutError):
+            if attempt:
+                raise
+        await asyncio.sleep(1)
+
+
 async def _prepare_media(media: list[dict], channel: dict, bot=None) -> list[dict]:
     prepared = []
     remaining = 64 * 1024 * 1024
@@ -124,7 +140,7 @@ async def _prepare_media(media: list[dict], channel: dict, bot=None) -> list[dic
                 continue
         video = item.get("type") == "video"
         limit = min(32 * 1024 * 1024 if video else 10 * 1024 * 1024, remaining)
-        response = await safe_http.fetch(url, max_bytes=limit, total_timeout=45,
+        response = await _fetch_media(url, max_bytes=limit, total_timeout=45,
             allowed_types=("video/mp4", "application/octet-stream") if video else ("image/jpeg", "image/png", "image/webp"))
         data = response.content
         if not data:
@@ -142,6 +158,8 @@ def _as_input(item: dict):
 
 
 async def publish(bot: Bot, channel: dict, text: str, media: list[dict]) -> Message:
+    if features.business_mode_unavailable(channel):
+        raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
     chat_id = channel["chat_id"] or f"@{(channel.get('username') or '').lstrip('@')}"
     media = await _prepare_media(media[:10], channel, bot)
 
@@ -236,6 +254,8 @@ class RecordedBot:
 
 
 async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None, approved_media: str = None) -> int:
+    if features.business_mode_unavailable(channel, post):
+        raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
     # Bound album buffers for API requests as well as background publications.
     async with runtime.delivery_slots:
         with channel_scope(channel):
@@ -243,18 +263,25 @@ async def publish_post(bot: Bot, post: dict, channel: dict, *, background: bool 
 
 
 async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool = False, approved_by_user: bool = False, approved_text: str = None, approved_media: str = None) -> int:
+    if features.business_mode_unavailable(channel, post):
+        raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
     if not await access.owner_has_access(channel['owner_id']):
         raise PermissionError('доступ владельца закрыт')
     pool = await db.connect()
     async with pool.acquire() as conn:
         async with conn.transaction():
             owner = await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1 FOR UPDATE', channel['owner_id'])
+            from app.billing.service import sync_entitlement
+            await sync_entitlement(conn,channel['owner_id'])
+            owner = await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1',channel['owner_id'])
             from app.api.auth import has_access
             if not owner or not has_access(dict(owner)):
                 raise PermissionError('доступ владельца закрыт')
             current_channel = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
             if not current_channel or current_channel['owner_id'] != channel['owner_id']:
                 raise AlreadyPublished('Канал больше недоступен')
+            if features.business_mode_unavailable(current_channel):
+                raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
             if current_channel['business_mode'] and (background or not approved_by_user):
                 raise AlreadyPublished('Бизнес-режим: требуется явное согласование')
             if background:
@@ -274,6 +301,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             fresh = await conn.fetchrow('SELECT * FROM posts WHERE id=$1 FOR UPDATE', post['id'])
             if not fresh or fresh['channel_id'] != channel['id'] or fresh['status'] not in CLAIMABLE:
                 raise AlreadyPublished('пост недоступен для публикации или уже отправляется')
+            if features.business_mode_unavailable(current_channel, fresh):
+                raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
             if background and fresh['publish_at'] and fresh['publish_at'] > datetime.now(timezone.utc):
                 raise AlreadyPublished('Время публикации ещё не наступило')
             if fresh['business_draft'] and (background or not approved_by_user):
@@ -293,12 +322,13 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
             if not (fresh['text_out'] or '').strip():
                 raise AlreadyPublished('нет готового текста — повторите обработку')
             if fresh['fingerprint'] and not fresh['is_manual']:
-                from app.core.filters import find_duplicate
+                from app.core.filters import find_duplicate, fingerprint
                 known = await conn.fetch(
-                    "SELECT id,fingerprint FROM posts WHERE channel_id=$1 AND id!=$2 "
+                    "SELECT id,raw_text,fingerprint FROM posts WHERE channel_id=$1 AND id!=$2 "
                     "AND status IN ('published','publishing','uncertain','partial') "
                     "AND fingerprint IS NOT NULL ORDER BY id DESC LIMIT 500", channel['id'], fresh['id'])
-                if find_duplicate(fresh['fingerprint'], [(r['id'],r['fingerprint']) for r in known]):
+                if find_duplicate(fingerprint(fresh['raw_text']) if fresh['raw_text'] else fresh['fingerprint'],
+                                  [(r['id'], fingerprint(r['raw_text']) if r['raw_text'] else r['fingerprint']) for r in known]):
                     raise AlreadyPublished('Эта новость уже опубликована или отправляется')
             if await _used_on_connection(conn, channel['owner_id']) >= owner['daily_limit']:
                 raise QuotaExceeded('исчерпан дневной лимит, включая отправляемые посты')
@@ -324,6 +354,10 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                   if status == 'partial' else 'Результат отправки неизвестен. Проверьте канал; автоматический повтор отключён.'
                   if status == 'uncertain' else f'Отправка отклонена: {type(exc).__name__}' +
                   (': ' + str(exc)[:180] if permanent_media_error else ': ' + exc.message[:180] if isinstance(exc, (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter)) else ''))
+        if status == 'failed' and isinstance(exc, httpx.HTTPStatusError):
+            reason = f'Не удалось загрузить вложение: источник вернул HTTP {exc.response.status_code}. Сообщения не отправлены.'
+        elif status == 'failed' and isinstance(exc, (httpx.TransportError, TimeoutError)):
+            reason = 'Сетевой сбой до отправки сообщения. Попытка будет повторена, пока материал актуален.'
         retry_seconds = exc.retry_after if isinstance(exc, TelegramRetryAfter) else min(900, 60 * 2**post['attempts'])
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -369,14 +403,19 @@ async def recover_stale_deliveries() -> int:
     async with pool.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch("UPDATE delivery_attempts SET status='uncertain', finished_at=now(), error_type='WorkerInterrupted' "
-                                    "WHERE status='sending' AND started_at < now()-interval '10 minutes' RETURNING post_id")
+                                    "WHERE status='sending' AND started_at < now()-interval '10 minutes' "
+                                    "AND ($1 OR (NOT EXISTS (SELECT 1 FROM channels c WHERE c.id=delivery_attempts.channel_id AND c.business_mode=1) "
+                                    "AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.id=delivery_attempts.post_id AND (p.business_draft=1 OR p.business_generated=1)))) RETURNING post_id",
+                                    features.BUSINESS_MODE_ENABLED)
             for row in rows:
                 await conn.execute("UPDATE posts SET status='uncertain', reason='Отправка прервана. Проверьте канал; автоматический повтор отключён.' "
                                    "WHERE id=$1 AND status='publishing'", row['post_id'])
             legacy = await conn.fetch(
                 "SELECT p.id, p.channel_id, c.owner_id FROM posts p JOIN channels c ON c.id=p.channel_id "
                 "WHERE p.status='publishing' AND p.created_at < now()-interval '10 minutes' "
-                "AND NOT EXISTS (SELECT 1 FROM delivery_attempts d WHERE d.post_id=p.id) FOR UPDATE OF p SKIP LOCKED")
+                "AND ($1 OR (c.business_mode=0 AND p.business_draft=0 AND p.business_generated=0)) "
+                "AND NOT EXISTS (SELECT 1 FROM delivery_attempts d WHERE d.post_id=p.id) FOR UPDATE OF p SKIP LOCKED",
+                features.BUSINESS_MODE_ENABLED)
             for post in legacy:
                 await conn.execute("INSERT INTO delivery_attempts (post_id,channel_id,owner_id,worker_id,status,error_type) "
                                    "VALUES ($1,$2,$3,$4,'uncertain','LegacyAttempt')", post['id'],post['channel_id'],post['owner_id'],WORKER_ID)
@@ -417,32 +456,45 @@ async def verify_channel_permissions(bot: Bot, chat_id: int, user_id: int) -> No
 
 async def reject_post(post_id: int) -> bool:
     return bool(await db.update(
-        "UPDATE posts SET status='rejected', media=CASE WHEN business_draft=1 THEN '[]' ELSE media END WHERE id=? AND status IN ('new','pending','approved','digest','failed')",
-        (post_id,),
+        "UPDATE posts SET status='rejected', media=CASE WHEN business_draft=1 THEN '[]' ELSE media END WHERE id=? AND status IN ('new','pending','approved','digest','failed') "
+        "AND (? OR (business_draft=0 AND business_generated=0 AND NOT EXISTS "
+        "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)))",
+        (post_id, features.BUSINESS_MODE_ENABLED),
     ))
 
 
 async def replace_draft(post: dict, text: str, fact_check, *, needs_review: bool = False) -> bool:
     """Optimistic version check: never modify a sent post or overwrite a newer edit."""
+    if features.business_mode_unavailable(post=post):
+        return False
     return bool(await db.update(
         "UPDATE posts SET text_out=?, fact_check=?, "
         "status=CASE WHEN ? THEN 'pending' ELSE status END, "
         "reason=CASE WHEN ? THEN 'Возможная реклама: требуется ручная проверка' ELSE reason END WHERE id=? "
         "AND status IN ('pending','approved','digest','failed') "
-        "AND text_out IS NOT DISTINCT FROM ?",
-        (text, json.dumps(fact_check, ensure_ascii=False) if fact_check else None, needs_review, needs_review, post['id'], post['text_out']),
+        "AND text_out IS NOT DISTINCT FROM ? "
+        "AND (? OR (business_draft=0 AND business_generated=0 AND NOT EXISTS "
+        "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)))",
+        (text, json.dumps(fact_check, ensure_ascii=False) if fact_check else None, needs_review, needs_review, post['id'], post['text_out'], features.BUSINESS_MODE_ENABLED),
     ))
 
 
 async def reconcile_delivery(post_id: int, channel: dict, *, delivered: bool) -> None:
     """Owner explicitly checks the channel. This action never sends a message."""
+    if features.business_mode_unavailable(channel):
+        raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
     pool = await db.connect()
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.fetchrow('SELECT tg_id FROM users WHERE tg_id=$1 FOR UPDATE', channel['owner_id'])
+            current_channel = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
+            if not current_channel or current_channel['owner_id'] != channel['owner_id']:
+                raise AlreadyPublished('Канал больше недоступен')
             post = await conn.fetchrow('SELECT * FROM posts WHERE id=$1 FOR UPDATE', post_id)
             if not post or post['channel_id'] != channel['id'] or post['status'] not in ('partial', 'uncertain'):
                 raise AlreadyPublished('результат уже сверён или отправка ещё выполняется')
+            if features.business_mode_unavailable(current_channel, post):
+                raise AlreadyPublished(features.BUSINESS_MODE_UNAVAILABLE)
             attempt = await conn.fetchrow('SELECT * FROM delivery_attempts WHERE post_id=$1 ORDER BY id DESC LIMIT 1 FOR UPDATE', post_id)
             receipts = json.loads(attempt['receipts']) if attempt and isinstance(attempt['receipts'], str) else (attempt['receipts'] if attempt else [])
             if not delivered and attempt and attempt['started_at'] > datetime.now(timezone.utc) - timedelta(minutes=10):

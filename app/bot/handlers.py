@@ -25,7 +25,7 @@ from app import db
 from app.ai import gemini, pipeline
 from app.api.auth import has_access
 from app.config import ADMIN_IDS, LOGO_DIR, PUBLIC_URL
-from app.core import access, publisher, watermark, runtime
+from app.core import access, publisher, watermark, runtime, features
 from app.sources import telegram_web, web
 
 log = logging.getLogger("bot")
@@ -101,7 +101,7 @@ async def cmd_start(message: Message) -> None:
         return await cmd_overview(message)
     keyboard = await welcome_markup(user)
     text = ('<b>Нейропостинг — ваша редакция в Telegram</b>\n\n'
-            'Готовьте посты, ведите каналы по расписанию и согласовывайте материалы компании в одном приложении.\n\n'
+            'Готовьте посты и ведите каналы по расписанию в одном приложении.\n\n'
             'Новости и черновики остаются в приложении. Здесь — ваши материалы, помощь и важные сообщения сервиса.\n\n')
     text += ('Откройте приложение, чтобы продолжить.' if has_access(user) else
              'Для начала откройте приложение и активируйте промокод. Нет кода? Напишите в поддержку.')
@@ -131,13 +131,12 @@ async def menu_info(callback: CallbackQuery):
     await callback.answer()
     text = ('<b>Что умеет Нейропостинг</b>\n\n'
             '• Новости из выбранных источников: подготовка текста и расписание.\n'
-            '• Режим бизнеса: досье компании, проекты, фото и обязательное согласование.\n'
             '• Настройки, история и контроль публикаций — в приложении.\n\n'
             'ИИ может ошибаться: проверяйте факты и права на материалы перед публикацией.'
             if callback.data == 'menu:about' else
             '<b>Как начать</b>\n\n1. Откройте приложение и активируйте промокод.\n'
             '2. Добавьте бота администратором своего канала с правом публикации.\n'
-            '3. Подключите канал в приложении.\n4. Выберите источники новостей или заполните досье компании.\n'
+            '3. Подключите канал в приложении.\n4. Выберите источники новостей.\n'
             '5. Проверьте настройки и первый черновик.')
     await callback.message.answer(text, parse_mode='HTML', reply_markup=miniapp_markup())
 
@@ -186,7 +185,7 @@ async def cmd_overview(message: Message) -> None:
     sources = await db.fetch_one(
         "SELECT COUNT(*) AS n FROM sources WHERE channel_id = ?", (channel["id"],)
     )
-    mode = "пауза" if channel["paused"] else ("автопостинг" if channel["autopost"] else "модерация")
+    mode = "пауза" if channel["paused"] or features.business_mode_unavailable(channel) else ("автопостинг" if channel["autopost"] else "модерация")
 
     text = (
         f"<b>{esc_html(channel['title'] or channel['username'])}</b> · {mode}\n"
@@ -255,7 +254,9 @@ async def on_forward_action(callback: CallbackQuery, bot: Bot) -> None:
         return
     if parts[1] == "choose":
         offset = int(parts[3]) if len(parts) == 4 and parts[3].isdigit() else 0
-        channels = await db.fetch_all("SELECT id,title,username FROM channels WHERE owner_id=? ORDER BY id LIMIT 21 OFFSET ?", (callback.from_user.id, offset))
+        channels = await db.fetch_all("SELECT id,title,username FROM channels WHERE owner_id=? "
+                                      "AND (? OR business_mode=0) ORDER BY id LIMIT 21 OFFSET ?",
+                                      (callback.from_user.id, features.BUSINESS_MODE_ENABLED, offset))
         if not channels:
             await callback.message.answer("Сначала добавьте свой канал в панели.")
             return
@@ -267,6 +268,12 @@ async def on_forward_action(callback: CallbackQuery, bot: Bot) -> None:
         await callback.message.edit_text(f"Куда добавить @{state['ref']}?", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     elif parts[1] == "add" and len(parts) == 4 and parts[3].isdigit():
         from app.sources.manage import add_forward_source
+        channel = await db.fetch_one('SELECT * FROM channels WHERE id=? AND owner_id=?',
+                                     (int(parts[3]), callback.from_user.id))
+        if not channel:
+            return await callback.message.answer('Канал недоступен. Выберите свой канал.')
+        if features.business_mode_unavailable(channel):
+            return await callback.message.answer(features.BUSINESS_MODE_UNAVAILABLE)
         try:
             async with httpx.AsyncClient() as client:
                 _, title = await telegram_web.fetch(client, state['ref'])
@@ -295,6 +302,8 @@ async def on_logo(message: Message, bot: Bot) -> None:
     channel = await active_channel(message.from_user.id)
     if not channel:
         return await message.answer("Сначала добавьте канал в панели.")
+    if features.business_mode_unavailable(channel):
+        return await message.answer(features.BUSINESS_MODE_UNAVAILABLE)
     path = LOGO_DIR / f"{channel['id']}.png"
     content = io.BytesIO()
     await bot.download(message.document, destination=content)
@@ -360,6 +369,8 @@ async def on_manual(message: Message, bot: Bot) -> None:
     channel = await active_channel(message.from_user.id)
     if not channel:
         return await message.answer("Сначала добавьте канал в панели.")
+    if features.business_mode_unavailable(channel):
+        return await message.answer(features.BUSINESS_MODE_UNAVAILABLE)
 
     notice = await message.answer("Обрабатываю…")
     try:
@@ -430,6 +441,8 @@ async def on_edit_reply(message: Message, bot: Bot) -> None:
     if not post:
         return
     channel = await db.fetch_one("SELECT * FROM channels WHERE id = ?", (post["channel_id"],))
+    if features.business_mode_unavailable(channel, post):
+        return await message.reply(features.BUSINESS_MODE_UNAVAILABLE)
     instruction = (message.text or "").strip()
     if not instruction:
         return
@@ -467,6 +480,8 @@ async def on_moderation(callback: CallbackQuery, bot: Bot) -> None:
     if not post or post["owner_id"] != callback.from_user.id:
         return await callback.answer("Пост недоступен", show_alert=True)
     channel = await db.fetch_one("SELECT * FROM channels WHERE id = ?", (post["channel_id"],))
+    if features.business_mode_unavailable(channel, post):
+        return await callback.answer(features.BUSINESS_MODE_UNAVAILABLE, show_alert=True)
 
     if action == "reject":
         if not await publisher.reject_post(post_id):

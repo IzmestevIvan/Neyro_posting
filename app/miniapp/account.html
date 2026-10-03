@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="same-origin">
+<title data-i18n="Мой аккаунт — Нейропостинг" data-i18n-en="My account — Neuroposting">My account — Neuroposting</title>
+<link rel="stylesheet" href="/static/style.css">
+<script defer src="https://oauth.telegram.org/js/telegram-login.js?6"></script>
+<script defer src="/static/preferences.js"></script>
+<script defer src="/static/account.js"></script>
+</head>
+<body class="account-page">
+<main class="account-shell">
+  <header class="head account-header"><div class="brand"><span class="mark" aria-hidden="true"></span><div><h1><span data-i18n="Нейропостинг" data-i18n-en="Neuroposting">Нейропостинг</span></h1><p class="status"><span data-i18n="Личный кабинет" data-i18n-en="My account">Личный кабинет</span></p></div></div><div class="header-actions"><span id="accountName" class="account-name" hidden></span><button id="logout" class="text-link" hidden><span data-i18n="Выйти" data-i18n-en="Sign out">Выйти</span></button></div></header>
+  <div class="preferences account-preferences" aria-label="Preferences" data-i18n-aria-label="Настройки интерфейса" data-i18n-aria-label-en="Interface preferences">
+    <label><span data-i18n="Оформление" data-i18n-en="Appearance">Оформление</span><select data-pref-theme>
+      <option value="system" data-i18n="Как на устройстве" data-i18n-en="System">Как на устройстве</option><option value="light" data-i18n="Светлое" data-i18n-en="Light">Светлое</option><option value="dark" data-i18n="Тёмное" data-i18n-en="Dark">Тёмное</option>
+    </select></label>
+    <label><span data-i18n="Язык" data-i18n-en="Language">Язык</span><select data-pref-language>
+      <option value="auto" data-i18n="Как на устройстве" data-i18n-en="Automatic">Как на устройстве</option><option value="ru">Русский</option><option value="en">English</option>
+    </select></label>
+  </div>
+  <p id="accountNotice" class="notice" role="status" hidden></p>
+  <section id="accountAuth" class="account-hero" aria-labelledby="loginTitle">
+    <span class="eyebrow"><span data-i18n="МЕНЬШЕ РУТИНЫ. БОЛЬШЕ ВРЕМЕНИ." data-i18n-en="LESS ROUTINE. MORE TIME.">МЕНЬШЕ РУТИНЫ. БОЛЬШЕ ВРЕМЕНИ.</span></span>
+    <h2 id="loginTitle"><span data-i18n="Ваши посты." data-i18n-en="Your posts.">Ваши посты.</span><br><span data-i18n="В вашем ритме." data-i18n-en="At your pace.">В вашем ритме.</span></h2>
+    <p><span data-i18n="Войдите через Telegram, чтобы подключить тариф и управлять доступом к Нейропостингу." data-i18n-en="Sign in with Telegram to choose a plan and manage your Neuroposting access.">Войдите через Telegram, чтобы подключить тариф и управлять доступом к Нейропостингу.</span></p>
+    <div class="login-widget"><button id="telegramLogin" class="accent" disabled><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-4 18-6-5-4 4 1-7L21 3 3 10l5 3"/></svg> <span data-i18n="Войти через Telegram" data-i18n-en="Sign in with Telegram">Войти через Telegram</span></button></div>
+    <p id="loginStatus" class="hint" role="status"><span data-i18n="Проверяем доступность входа…" data-i18n-en="Checking sign-in availability…">Проверяем доступность входа…</span></p>
+  </section>
+  <section id="accountAccess" hidden aria-labelledby="accessTitle">
+    <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ВАШ АККАУНТ" data-i18n-en="YOUR ACCOUNT">ВАШ АККАУНТ</span></span><h2 id="accessTitle"><span data-i18n="Мой тариф" data-i18n-en="My plan">Мой тариф</span></h2><p class="muted"><span data-i18n="Выберите удобный объём работы с ИИ." data-i18n-en="Choose the AI posting allowance that fits your workflow.">Выберите удобный объём работы с ИИ.</span></p></div>
+    <div class="account-columns"><div id="accountPlan" class="card current-plan" aria-live="polite"></div><aside class="account-notes"><b><span data-i18n="Один аккаунт — общий лимит" data-i18n-en="One account, one shared allowance">Один аккаунт — общий лимит</span></b><p><span data-i18n="Посты с ИИ учитываются суммарно по всем вашим каналам. Лимит обновляется каждый день в 03:00 по Москве." data-i18n-en="AI posts count towards a shared allowance across all your channels. It resets daily at 03:00 Moscow time.">Посты с ИИ учитываются суммарно по всем вашим каналам. Лимит обновляется каждый день в 03:00 по Москве.</span></p><p><span data-i18n="Продление вручную." data-i18n-en="Renew manually.">Продление вручную.</span><br><span data-i18n="Автоматических списаний нет." data-i18n-en="No automatic charges.">Автоматических списаний нет.</span></p></aside></div>
+  </section>
+  <section aria-labelledby="plansTitle">
+    <div class="billing-section-head"><h3 id="plansTitle"><span data-i18n="Тарифы на месяц" data-i18n-en="Monthly plans">Тарифы на месяц</span></h3><span><span data-i18n="Без автосписаний" data-i18n-en="No automatic charges">Без автосписаний</span></span></div>
+    <p class="hint"><span data-i18n="Выберите, сколько постов готовить с ИИ каждый день." data-i18n-en="Choose how many AI posts to create each day.">Выберите, сколько постов готовить с ИИ каждый день.</span></p>
+    <div id="accountPlans" class="plan-grid" aria-live="polite"></div>
+    <p id="paymentAvailability" class="notice" role="status" hidden></p>
+    <p id="receiptNotice" class="hint" hidden><span data-i18n="Продавец — самозанятый. Чек формируется в «Мой налог»; ссылка на него появится в разделе «Мои оплаты»." data-i18n-en="The seller is self-employed. Your receipt is issued through My Tax; the link will appear under My payments.">Продавец — самозанятый. Чек формируется в «Мой налог»; ссылка на него появится в разделе «Мои оплаты».</span></p>
+    <section id="accountQuote" class="card checkout-card" hidden aria-labelledby="quoteTitle" tabindex="-1">
+      <div class="checkout-heading"><h3 id="quoteTitle"><span data-i18n="Проверьте выбор" data-i18n-en="Review your choice">Проверьте выбор</span></h3><button id="cancelQuote" class="text-link"><span data-i18n="Отменить" data-i18n-en="Cancel">Отменить</span></button></div>
+      <div id="quoteSummary"></div>
+      <div id="receiptField"><label class="label" for="receiptEmail"><span data-i18n="Email для чека" data-i18n-en="Receipt email">Email для чека</span></label><input id="receiptEmail" type="email" autocomplete="email" maxlength="254" placeholder="mail@example.ru" required></div>
+      <button id="accountCheckout" class="accent wide" disabled><span data-i18n="Перейти к оплате" data-i18n-en="Continue to payment">Перейти к оплате</span></button><p id="checkoutStatus" class="hint" role="status"></p>
+    </section>
+    <div class="billing-terms"><p><b><span data-i18n="Нужно больше постов?" data-i18n-en="Need more posts?">Нужно больше постов?</span></b> <span data-i18n="Тариф выше включится сразу после оплаты. Доплата — только за оставшееся время текущего периода." data-i18n-en="Your upgrade starts after payment. You only pay the difference for the remaining time in your current period.">Тариф выше включится сразу после оплаты. Доплата — только за оставшееся время текущего периода.</span></p><p><b><span data-i18n="Хотите уменьшить тариф?" data-i18n-en="Want a smaller plan?">Хотите уменьшить тариф?</span></b> <span data-i18n="Выберите его для следующего продления. После текущего периода потребуется вручную оплатить новый тариф; до этого сохранится прежний лимит." data-i18n-en="Choose it for your next renewal. Pay for the new plan manually after the current period; your existing allowance remains until then.">Выберите его для следующего продления. После текущего периода потребуется вручную оплатить новый тариф; до этого сохранится прежний лимит.</span></p><p><span data-i18n="UNLIMITED включает до 50 постов с ИИ в день. Каждый тариф действует один месяц; продление подтверждаете вы." data-i18n-en="UNLIMITED includes up to 50 AI posts a day. Each plan lasts one month; you decide when to renew.">UNLIMITED включает до 50 постов с ИИ в день. Каждый тариф действует один месяц; продление подтверждаете вы.</span></p></div>
+  </section>
+  <section id="accountOrders" hidden aria-labelledby="ordersTitle"><div class="billing-section-head"><h3 id="ordersTitle"><span data-i18n="Мои оплаты" data-i18n-en="My payments">Мои оплаты</span></h3><button id="refreshOrders" class="text-link"><span data-i18n="Обновить" data-i18n-en="Refresh">Обновить</span></button></div><p id="paymentStatus" class="notice" role="status" hidden></p><div id="orderHistory" class="order-history"></div></section>
+  <section id="adminReceipts" hidden aria-labelledby="adminReceiptsTitle">
+    <details class="card">
+      <summary id="adminReceiptsTitle"><span data-i18n="Чеки для покупателей" data-i18n-en="Customer receipts">Чеки для покупателей</span></summary>
+      <p class="hint"><span data-i18n="Сформируйте чек в «Мой налог», сверьте покупателя, сумму и услугу с оплатой, затем добавьте ссылку. Покупатель увидит её в своём кабинете. Отправка по email не выполняется автоматически." data-i18n-en="Issue the receipt in My Tax and check the customer, amount and service against the payment. Then add its link for the customer to view in their account. Email is not sent automatically.">Сформируйте чек в «Мой налог», сверьте покупателя, сумму и услугу с оплатой, затем добавьте ссылку. Покупатель увидит её в своём кабинете. Отправка по email не выполняется автоматически.</span></p>
+      <button id="refreshAdminReceipts" class="text-link"><span data-i18n="Обновить список" data-i18n-en="Refresh list">Обновить список</span></button>
+      <p id="adminReceiptStatus" class="notice" role="status" hidden></p>
+      <div id="adminReceiptList" class="order-history"></div>
+    </details>
+  </section>
+  <footer class="account-footer"><span data-i18n="Нейропостинг · Оплата через ЮKassa" data-i18n-en="Neuroposting · Payments by YooKassa">Нейропостинг · Оплата через ЮKassa</span></footer>
+</main>
+</body>
+</html>

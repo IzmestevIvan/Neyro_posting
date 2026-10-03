@@ -21,6 +21,8 @@ async def test_business_does_not_collect_old_news(store,channel,monkeypatch):
 
 @pytest.mark.asyncio
 async def test_business_manual_uses_dossier_not_news_filter(store,channel,monkeypatch):
+    from app.core import features
+    monkeypatch.setattr(features,'BUSINESS_MODE_ENABLED',True)
     await store.execute('UPDATE channels SET business_mode=1 WHERE id=?',(channel['id'],))
     post = await make_post(store,channel,status='new')
     await store.execute('UPDATE posts SET is_manual=1 WHERE id=?',(post['id'],))

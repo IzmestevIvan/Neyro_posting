@@ -16,3 +16,12 @@ node_modules/
 # адрес прода и ключи деплоя
 .deploy.env
 .support.env
+.app.env
+.billing.env
+# Protected environment variants and interrupted renderer temporary files.
+.env.*
+!.env.billing.example
+.app.env.*
+.billing.env.*
+.support.env.*
+.deploy.env.*

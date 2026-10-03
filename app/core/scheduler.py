@@ -17,7 +17,7 @@ from aiogram import Bot
 from app import db
 from app.ai import gemini, pipeline
 from app.config import ADMIN_IDS, DELAY_MODES, PACE_MODES, POLL_INTERVAL
-from app.core import access, adbook, publisher, news_policy, runtime
+from app.core import access, adbook, publisher, news_policy, runtime, features
 from app.core.operations import channel_scope
 from app.core.filters import find_duplicate, fingerprint, stopword_hit
 from app.sources import rss, telegram_web
@@ -134,15 +134,20 @@ def next_window_start(local: datetime, channel: dict) -> datetime:
 
 async def expire_news() -> int:
     return await db.update(
-        "UPDATE posts p SET status='expired',reason='Новость устарела или в канале уже вышел более свежий материал' "
+        "UPDATE posts p SET status='expired',reason=(CASE WHEN p.created_at < now()-"
+        "CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 THEN interval '1 hour' ELSE interval '24 hours' END "
+        "THEN 'Новость устарела: истёк срок актуальности' ELSE 'В канале уже вышел более свежий материал' END) "
+        "|| CASE WHEN coalesce(p.reason,'')='' THEN '' ELSE '. Предыдущая причина: ' || left(p.reason,300) END "
         "FROM channels c WHERE c.id=p.channel_id "
+        "AND (? OR (c.business_mode=0 AND p.business_draft=0 AND p.business_generated=0)) "
         "AND p.is_manual=0 AND p.status IN ('new','pending','approved','failed','digest') "
         "AND (p.created_at < now()-CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 "
         "THEN interval '1 hour' ELSE interval '24 hours' END OR "
         "(c.delay_mode='instant' AND c.digest_enabled=0 AND EXISTS (SELECT 1 FROM posts newer "
         "WHERE newer.channel_id=p.channel_id AND newer.status='published' AND newer.is_manual=0 "
         "AND newer.created_at>p.created_at))) "
-        "AND NOT EXISTS(SELECT 1 FROM delivery_attempts d WHERE d.post_id=p.id AND (d.status!='failed' OR d.receipts!='[]'::jsonb))")
+        "AND NOT EXISTS(SELECT 1 FROM delivery_attempts d WHERE d.post_id=p.id AND (d.status!='failed' OR d.receipts!='[]'::jsonb))",
+        (features.BUSINESS_MODE_ENABLED,))
 
 
 async def _plan_publish_at(channel: dict) -> datetime:
@@ -168,12 +173,12 @@ async def _plan_publish_at(channel: dict) -> datetime:
 
 async def _known_fingerprints(channel_id: int, exclude_id: int) -> list[tuple[int, str]]:
     rows = await db.fetch_all(
-        "SELECT id, fingerprint FROM posts WHERE channel_id = ? AND id != ? AND fingerprint IS NOT NULL "
+        "SELECT id, raw_text, fingerprint FROM posts WHERE channel_id = ? AND id != ? AND fingerprint IS NOT NULL "
         "AND status IN ('pending','approved','digest','published','publishing','uncertain','partial') "
         "ORDER BY id DESC LIMIT ?",
         (channel_id, exclude_id, DUP_WINDOW),
     )
-    return [(r["id"], r["fingerprint"]) for r in rows]
+    return [(r["id"], fingerprint(r["raw_text"]) if r["raw_text"] else r["fingerprint"]) for r in rows]
 
 
 def _pick_new(items: list, last_uid: Optional[str]) -> list:
@@ -218,6 +223,8 @@ def popularity_threshold(item, items, now: datetime) -> Optional[int]:
 
 
 async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) -> int:
+    if channel.get('business_mode'):
+        return 0
     items, title = await fetch_source(client, source)
     median = 0 if source['kind']=='rss' else telegram_web.median_views(items)
 
@@ -304,11 +311,11 @@ async def _reject(post: dict, status: str, reason: str, stat_field: str) -> None
         await db.bump_stat(post["channel_id"], now_utc().date(), stat_field)
 
 
-async def defer_processing(post: dict, reason: str) -> None:
+async def defer_processing(post: dict, reason: str, *, seconds: int = 900) -> None:
     # A provider outage is not an editorial rejection. Retry without filling the
     # filtered counter or starving other channels. No unchecked text becomes ready.
     await db.execute("UPDATE posts SET status='new', reason=?, publish_at=? WHERE id=? AND status='new'",
-                     (reason[:200], now_utc() + timedelta(minutes=15), post["id"]))
+                     (reason[:200], now_utc() + timedelta(seconds=seconds), post["id"]))
 
 
 async def reconsider_filtered(channel_id: int) -> int:
@@ -316,16 +323,19 @@ async def reconsider_filtered(channel_id: int) -> int:
     return await db.update(
         "UPDATE posts p SET status='new',reason=NULL,publish_at=NULL WHERE p.status='filtered' AND p.id IN ("
         "SELECT old.id FROM posts old JOIN channels c ON c.id=old.channel_id WHERE c.id=? "
+        "AND (? OR (c.business_mode=0 AND old.business_draft=0 AND old.business_generated=0)) "
         "AND old.status='filtered' AND old.is_manual=0 "
         "AND ((c.hits_only=0 AND (old.reason LIKE 'ниже медианы источника%' OR old.reason LIKE 'ниже медианы ровесников источника%')) "
         "OR (c.media_only=0 AND old.reason='нет медиа')) "
         "AND old.created_at>=now()-CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 "
         "THEN interval '1 hour' ELSE interval '24 hours' END "
         "AND NOT EXISTS(SELECT 1 FROM delivery_attempts d WHERE d.post_id=old.id) "
-        "ORDER BY old.created_at DESC,old.id DESC LIMIT 20)", (channel_id,))
+        "ORDER BY old.created_at DESC,old.id DESC LIMIT 20)", (channel_id, features.BUSINESS_MODE_ENABLED))
 
 
 async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool = False) -> None:
+    if features.business_mode_unavailable(channel, post):
+        return
     if not await access.owner_has_access(channel['owner_id']):
         return
     lock = runtime.channel_lock(channel['id'])
@@ -335,7 +345,7 @@ async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool 
         fresh = await db.fetch_one("SELECT * FROM posts WHERE id=? AND status='new'", (post['id'],))
         if fresh:
             current = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
-            if not current:
+            if not current or features.business_mode_unavailable(current, fresh):
                 return
             if current.get('business_mode') and not fresh['is_manual']:
                 return
@@ -354,11 +364,13 @@ async def process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool 
                 await db.execute("UPDATE posts SET status='pending',text_out=?,reason=?,fact_check=?,business_draft=1,publish_at=NULL "
                                  "WHERE id=? AND status='new'", (text, reason, json.dumps({'research':research},ensure_ascii=False), fresh['id']))
                 return
-            with channel_scope(channel):
-                await _process_post(bot, fresh, channel, force_once=force_once)
+            with channel_scope(current):
+                await _process_post(bot, fresh, current, force_once=force_once)
 
 
 async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool = False) -> None:
+    if features.business_mode_unavailable(channel, post):
+        return
     if force_once:
         channel = dict(channel, paused=0, window_start=0, window_end=24, delay_mode="instant", pace="as_they_come", digest_enabled=0)
     if news_policy.stale(post, channel):
@@ -392,6 +404,11 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
     api_key = channel["gemini_key"] or None
     voice = channel["voice_sample"] or "" if channel["channel_voice"] else ""
 
+    recent_posts = await db.fetch_all(
+        "SELECT id, text_out FROM posts WHERE channel_id=? AND id!=? "
+        "AND status IN ('pending','approved','digest','published','publishing','uncertain','partial') "
+        "AND created_at>=now()-interval '24 hours' AND text_out IS NOT NULL "
+        "ORDER BY id DESC LIMIT 40", (channel['id'], post['id']))
     try:
         result = await pipeline.process(
             post["raw_text"] or "",
@@ -400,12 +417,15 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
             lang=channel["lang"],
             api_key=api_key,
             voice_sample=voice,
+            recent_posts=recent_posts,
         )
     except gemini.NoKeyError:
         # Leave the post as 'new' so it is picked up once a key is configured, but stop the
         # loop from re-reading the same rows every few seconds until then.
         state["last_error"] = "не задан ключ Gemini"
         return await defer_processing(post, "Не задан ключ Gemini — повтор через 15 минут")
+    except gemini.BusyError as exc:
+        return await defer_processing(post, 'Маршруты ИИ заняты — повтор через 30 секунд', seconds=exc.retry_after)
     except gemini.AIError as exc:
         state["last_error"] = str(exc)[:150]
         await alert_admins(bot, "ai", "Доступные маршруты ИИ не завершили обработку. Материал сохранён, повтор через 15 минут. Проверьте квоты ключей, если сбой повторяется.")
@@ -414,7 +434,17 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
     if result.ai_requests:
         await db.bump_stat(channel["id"], day, "ai_requests", result.ai_requests)
 
+    fresh_channel = await db.fetch_one("SELECT * FROM channels WHERE id=?", (channel['id'],))
+    if not fresh_channel:
+        return
+    editorial_fields = ('quality', 'instructions', 'lang', 'stopwords', 'media_only', 'hits_only',
+                        'channel_voice', 'voice_sample', 'business_mode')
+    if any(fresh_channel.get(key) != channel.get(key) for key in editorial_fields):
+        return await defer_processing(post, 'Настройки контента изменились — требуется новая проверка')
+
     if not result.ok:
+        if result.duplicate_of:
+            return await _reject(post, "duplicate", f"повтор новости #{result.duplicate_of}", "duplicates")
         if result.retryable:
             await alert_admins(bot, "ai", f"Проверка материала не завершена: {result.reason}. Материал сохранён, повтор через 15 минут.")
             return await defer_processing(post, result.reason or "ИИ временно недоступен")
@@ -424,9 +454,6 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
             await adbook.record(post, result.ad_score, result.ad_reasons)
         return await _reject(post, "filtered", result.reason or "не прошёл проверку", "filtered")
 
-    fresh_channel = await db.fetch_one("SELECT * FROM channels WHERE id=?", (channel['id'],))
-    if not fresh_channel:
-        return
     channel = dict(fresh_channel, paused=0, window_start=0, window_end=24, delay_mode="instant", pace="as_they_come", digest_enabled=0) if force_once else fresh_channel
     if news_policy.stale(post, channel):
         await db.execute("UPDATE posts SET status='expired',reason='Новость устарела во время обработки' WHERE id=? AND status='new'", (post['id'],))
@@ -488,15 +515,16 @@ async def publish_due(bot: Bot, *, active=None) -> None:
     rows = await db.fetch_all(
         "SELECT * FROM (SELECT DISTINCT ON (p.channel_id) p.*,c.owner_id FROM posts p "
         "JOIN channels c ON c.id=p.channel_id WHERE p.status='approved' AND p.channel_id=ANY(?::bigint[]) "
+        "AND (? OR (p.business_draft=0 AND p.business_generated=0)) "
         "AND (p.publish_at IS NULL OR p.publish_at<=?) "
         "ORDER BY p.channel_id,p.created_at DESC,p.id DESC) candidates "
         "ORDER BY (SELECT max(published_at) FROM posts sent WHERE sent.channel_id=candidates.channel_id "
         "AND sent.status='published') ASC NULLS FIRST,created_at LIMIT ?",
-        (eligible, db.utcnow(),120 if active is None else max(0,2-len(active))),
+        (eligible, features.BUSINESS_MODE_ENABLED, db.utcnow(),120 if active is None else max(0,2-len(active))),
     )
     async def send(post):
         channel = await db.fetch_one("SELECT * FROM channels WHERE id = ?", (post["channel_id"],))
-        if not channel:
+        if not channel or features.business_mode_unavailable(channel, post):
             return
         if channel['paused'] or not news_policy.window_open(channel, now_utc()):
             return
@@ -521,6 +549,8 @@ async def publish_due(bot: Bot, *, active=None) -> None:
 
 
 async def run_digest(bot: Bot, channel: dict) -> None:
+    if channel.get('business_mode'):
+        return
     fresh_channel = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
     if not fresh_channel or fresh_channel.get('business_mode'):
         return
@@ -531,7 +561,9 @@ async def run_digest(bot: Bot, channel: dict) -> None:
         return
     rows = await db.fetch_all(
         "SELECT * FROM posts WHERE channel_id = ? AND status = 'digest' "
-        "AND created_at>=now()-interval '24 hours' ORDER BY created_at DESC,id DESC LIMIT 100", (channel["id"],)
+        "AND (? OR (business_draft=0 AND business_generated=0)) "
+        "AND created_at>=now()-interval '24 hours' ORDER BY created_at DESC,id DESC LIMIT 100",
+        (channel["id"], features.BUSINESS_MODE_ENABLED)
     )
     if not rows:
         return
@@ -570,7 +602,7 @@ async def run_digest(bot: Bot, channel: dict) -> None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             fresh = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
-            if not fresh or fresh['paused'] or not fresh['autopost'] or fresh['digest_sent_on'] == local_day:
+            if not fresh or fresh['business_mode'] or fresh['paused'] or not fresh['autopost'] or fresh['digest_sent_on'] == local_day:
                 return
             members = await conn.fetch('SELECT id,status FROM posts WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE', ids)
             if len(members) != len(ids) or any(r['status'] != 'digest' for r in members):
@@ -590,7 +622,7 @@ async def run_digest(bot: Bot, channel: dict) -> None:
 
 
 async def digest_due(bot: Bot) -> None:
-    channels = await db.fetch_all("SELECT * FROM channels WHERE digest_enabled = 1 AND paused = 0")
+    channels = await db.fetch_all("SELECT * FROM channels WHERE digest_enabled = 1 AND paused = 0 AND business_mode = 0")
     async def digest(channel):
         local = now_utc().astimezone(channel_tz(channel))
         try:
@@ -625,7 +657,7 @@ async def save_snapshot(channel_id: int, day, subscribers: int, avg_views: int) 
 
 async def refresh_stats(bot: Bot) -> None:
     day = now_utc().date()
-    channels = await db.fetch_all("SELECT * FROM channels")
+    channels = await db.fetch_all("SELECT * FROM channels WHERE ? OR business_mode=0", (features.BUSINESS_MODE_ENABLED,))
     async with httpx.AsyncClient() as client:
         for channel in channels:
             subscribers, avg_views = 0, 0
@@ -663,6 +695,17 @@ async def prune_posts() -> None:
          "(status!='new' AND last_seen_at < now()-interval '90 days')"),
     ]
     for table, where in policies:
+        if not features.BUSINESS_MODE_ENABLED:
+            # Retain company history and delivery receipts throughout the suspension.
+            if table == 'posts':
+                where = (f"({where}) AND business_draft=0 AND business_generated=0 AND NOT EXISTS "
+                         "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)")
+            elif table == 'delivery_attempts':
+                where = (f"({where}) AND NOT EXISTS (SELECT 1 FROM posts p JOIN channels c ON c.id=p.channel_id "
+                         "WHERE p.id=delivery_attempts.post_id AND (c.business_mode=1 OR p.business_draft=1 OR p.business_generated=1))")
+            elif table == 'ad_offers':
+                where = (f"({where}) AND NOT EXISTS "
+                         "(SELECT 1 FROM channels c WHERE c.id=ad_offers.channel_id AND c.business_mode=1)")
         while True:
             deleted = await db.update(f"DELETE FROM {table} WHERE id IN "
                                       f"(SELECT id FROM {table} WHERE {where} ORDER BY id LIMIT 500)")
@@ -705,15 +748,18 @@ async def process_round(bot: Bot, after_channel: int = 0) -> int:
     """One candidate per channel, rotating the starting point to prevent starvation."""
     eligible = []
     for channel in await db.fetch_all("SELECT * FROM channels WHERE paused=0"):
+        if features.business_mode_unavailable(channel):
+            continue
         if (not news_policy.realtime(channel) or news_policy.window_open(channel, now_utc())) and await access.owner_has_access(channel['owner_id']):
             eligible.append(channel['id'])
     rows = await db.fetch_all(
         "SELECT * FROM (SELECT DISTINCT ON (channel_id) * FROM posts WHERE status='new' "
         "AND channel_id=ANY(?::bigint[]) AND (is_manual=1 OR NOT EXISTS "
         "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)) "
+        "AND (? OR (business_draft=0 AND business_generated=0)) "
         "AND (publish_at IS NULL OR publish_at<=now()) "
         "ORDER BY channel_id,created_at DESC,id DESC) candidates "
-        "ORDER BY (channel_id<=?),channel_id LIMIT 12", (eligible, after_channel))
+        "ORDER BY (channel_id<=?),channel_id LIMIT 12", (eligible, features.BUSINESS_MODE_ENABLED, after_channel))
     state['processing'] = len(rows)
 
     async def process(post):
@@ -758,6 +804,8 @@ async def process_loop(bot: Bot) -> None:
                 if len(active) < 3:
                     channels = await db.fetch_all('SELECT * FROM channels WHERE paused=0 ORDER BY (id<=?),id', (cursor,))
                     for channel in channels:
+                        if features.business_mode_unavailable(channel):
+                            continue
                         cid = channel['id']
                         if cid in active or runtime.channel_lock(cid).locked():
                             continue
@@ -767,7 +815,8 @@ async def process_loop(bot: Bot) -> None:
                             continue
                         post = await db.fetch_one("SELECT * FROM posts WHERE channel_id=? AND status='new' "
                             "AND (?=0 OR is_manual=1) AND (publish_at IS NULL OR publish_at<=now()) "
-                            "ORDER BY created_at DESC,id DESC LIMIT 1", (cid, channel.get('business_mode',0)))
+                            "AND (? OR (business_draft=0 AND business_generated=0)) "
+                            "ORDER BY created_at DESC,id DESC LIMIT 1", (cid, channel.get('business_mode',0), features.BUSINESS_MODE_ENABLED))
                         if post:
                             active[cid] = asyncio.create_task(run(post, channel))
                             cursor = cid
@@ -832,19 +881,23 @@ async def stats_loop(bot: Bot) -> None:
 
 
 def start(bot: Bot) -> list[asyncio.Task]:
-    from app.core.business import proposal_loop
-    return [
-        asyncio.create_task(proposal_loop()),
+    tasks = [
         asyncio.create_task(poll_loop(bot)),
         asyncio.create_task(process_loop(bot)),
         asyncio.create_task(publish_loop(bot)),
         asyncio.create_task(digest_loop(bot)),
         asyncio.create_task(stats_loop(bot)),
     ]
+    if features.BUSINESS_MODE_ENABLED:
+        from app.core.business import proposal_loop
+        tasks.append(asyncio.create_task(proposal_loop()))
+    return tasks
 
 
 async def publish_fresh_once(bot: Bot, channel: dict) -> dict:
     """One explicit request: refresh sources, validate fresh news, send at most one."""
+    if features.business_mode_unavailable(channel):
+        raise ValueError(features.BUSINESS_MODE_UNAVAILABLE)
     lock = runtime.channel_lock(channel['id'])
     if lock.locked() or runtime.fresh_slots.locked():
         raise ValueError('Подготовка постов уже идёт. Повторите через минуту.')
@@ -858,6 +911,8 @@ async def publish_fresh_once(bot: Bot, channel: dict) -> dict:
 
 async def _publish_fresh_once(bot: Bot, channel: dict) -> dict:
     fresh_channel = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
+    if features.business_mode_unavailable(fresh_channel):
+        raise ValueError(features.BUSINESS_MODE_UNAVAILABLE)
     if fresh_channel and fresh_channel.get('business_mode'):
         raise ValueError('Бизнес-режим: подготовьте черновик и подтвердите его в приложении')
     if not await access.owner_has_access(channel['owner_id']):
@@ -889,6 +944,8 @@ async def _publish_fresh_once(bot: Bot, channel: dict) -> dict:
             existing = await conn.fetchrow('SELECT * FROM posts WHERE channel_id=$1 AND (uid=$2 OR (uid=$3 AND source_id=$4))', channel['id'], uid, item.uid, source['id'])
             if existing:
                 post = dict(existing)
+                if features.business_mode_unavailable(fresh_channel, post):
+                    continue
                 if post['status'] not in ('new', 'approved', 'pending') or post.get('reason') and post['status'] != 'new':
                     continue
                 # Always regenerate from the current source; never send a cached draft.

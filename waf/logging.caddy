@@ -1,0 +1,28 @@
+# Import INSIDE the one global options block. Access-log redaction alone is
+# insufficient: Coraza emits matched values inside runtime log messages.
+log default {
+	exclude http.handlers.waf http.log.error
+	format filter {
+		wrap json
+		fields {
+			request>headers delete
+			request>uri delete
+			resp_headers delete
+			uri delete
+		}
+	}
+}
+log waf_security {
+	include http.handlers.waf http.log.error
+	output stderr
+	format filter {
+		wrap json
+		fields {
+			msg replace "Security event; request details redacted"
+			request>headers delete
+			request>uri delete
+			resp_headers delete
+			uri delete
+		}
+	}
+}

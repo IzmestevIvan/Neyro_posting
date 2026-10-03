@@ -123,6 +123,15 @@ async def redeem(code: str, tg_id: int) -> dict:
                 raise PromoError('Срок активации кода истёк')
             if row['assigned_to'] is not None and row['assigned_to'] != tg_id:
                 raise PromoError('Код предназначен другому клиенту')
+            if await conn.fetchval("SELECT 1 FROM billing_orders WHERE user_id=$1 AND status IN ('creating','pending','review')",tg_id):
+                raise PromoError('Сначала дождитесь проверки платежа')
+            if await conn.fetchval('SELECT 1 FROM billing_periods WHERE user_id=$1 AND NOT revoked AND ends_at>now()',tg_id):
+                raise PromoError('Код доступа нельзя совместить с оплаченной подпиской. Обратитесь в поддержку.')
+            from app.billing.service import sync_entitlement
+            if await conn.fetchval('SELECT 1 FROM billing_accounts WHERE user_id=$1',tg_id):
+                await sync_entitlement(conn,tg_id)
+                await conn.execute('UPDATE billing_accounts SET version=version+1 WHERE user_id=$1',tg_id)
+                user=await conn.fetchrow('SELECT * FROM users WHERE tg_id=$1',tg_id)
             current = user["access_until"]
             until = max(current, now) + timedelta(days=row["days"]) if current else now + timedelta(days=row["days"])
             await conn.execute(

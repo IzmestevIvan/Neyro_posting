@@ -20,7 +20,7 @@ COPYFILE_DISABLE=1 tar czf - \
   2>/dev/null | ssh -i "$KEY" "$SERVER" "mkdir -p $REMOTE && tar xzf - -C $REMOTE"
 
 echo "→ пересобираю и перезапускаю"
-ssh -i "$KEY" "$SERVER" "cd $REMOTE && docker compose up -d --build"
+ssh -i "$KEY" "$SERVER" "cd $REMOTE && bash scripts/render-app-env.sh && docker compose up -d --build"
 
 echo "→ статус"
 ssh -i "$KEY" "$SERVER" "cd $REMOTE && docker compose ps && docker compose logs app --tail 5"

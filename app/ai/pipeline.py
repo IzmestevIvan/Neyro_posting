@@ -18,6 +18,7 @@ class Result:
     warnings: list[str] = field(default_factory=list)
     retryable: bool = False
     needs_review: bool = False
+    duplicate_of: Optional[int] = None
     is_ad: bool = False
     ad_score: int = 0
     ad_reasons: list[str] = field(default_factory=list)
@@ -31,6 +32,7 @@ async def process(
     lang: str,
     api_key: Optional[str],
     voice_sample: str = "",
+    recent_posts: Optional[list[dict]] = None,
 ) -> Result:
     text = strip_source_artifacts(raw_text)
     if len(text) < 40:
@@ -51,7 +53,7 @@ async def process(
     if quality in ("balanced", "super"):
         try:
             triage = await gemini.generate_json(
-                prompts.triage_prompt(text, instructions),
+                prompts.triage_prompt(text, instructions, recent_posts),
                 api_key=api_key,
                 system=prompts.TRIAGE_SYSTEM,
                 temperature=0.2,
@@ -59,6 +61,12 @@ async def process(
             calls += 1
             if any(type(triage.get(key)) is not bool for key in ("is_ad", "is_offtopic", "is_newsworthy")):
                 raise gemini.AIError("некорректная структура триажа")
+            duplicate_id = triage.get('duplicate_of')
+            if duplicate_id is not None:
+                if type(duplicate_id) is not int or duplicate_id not in {p['id'] for p in (recent_posts or [])}:
+                    raise gemini.AIError('некорректная ссылка на повтор новости')
+                return Result(False, reason=f'повтор новости #{duplicate_id}',
+                              duplicate_of=duplicate_id, ai_requests=calls)
             if triage.get("is_ad"):
                 if confirmed is None:
                     confirmed = await _confirm_ad(raw_text, api_key)
@@ -72,7 +80,7 @@ async def process(
                 return Result(False, reason=f"оффтоп: {triage.get('reason', '')}", ai_requests=calls)
             if triage.get("is_newsworthy") is False:
                 return Result(False, reason="нет информационного повода", ai_requests=calls)
-        except gemini.NoKeyError:
+        except (gemini.NoKeyError, gemini.BusyError):
             raise
         except gemini.AIError as exc:
             return Result(False, reason="триаж недоступен — ожидает повторной проверки", retryable=True, ai_requests=calls)
@@ -88,6 +96,8 @@ async def process(
     )
     calls += 1
     rewritten = rewritten.strip()
+    if len(rewritten) < 40:
+        return Result(False, reason="рерайт пустой или не содержит полноценного поста", retryable=True, ai_requests=calls)
 
     if quality != "super":
         return Result(True, text=rewritten, ai_requests=calls, needs_review=needs_review)
@@ -111,12 +121,15 @@ async def process(
             temperature=0.3,
         )
         calls += 1
+        if len(retry.strip()) < 40:
+            return Result(False, reason="повторный рерайт пустой или неполный", retryable=True, ai_requests=calls)
         recheck = await _factcheck(text, retry.strip(), api_key)
         calls += 1
         if recheck is not None and recheck.get("ok"):
             return Result(True, text=retry.strip(), fact_check=recheck, ai_requests=calls, needs_review=needs_review)
         if recheck is None:
             return Result(False, reason="повторный фактчек недоступен — ожидает повторной проверки", retryable=True, ai_requests=calls)
+        check = recheck
         issues = (check.get("hallucinations") or []) + (check.get("distortions") or [])
         return Result(
             False,
@@ -147,6 +160,8 @@ async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> O
         if check["ok"] and (check["hallucinations"] or check["distortions"]):
             raise gemini.AIError("противоречивый результат фактчека")
         return check
+    except gemini.BusyError:
+        raise
     except gemini.AIError as exc:
         log.warning("factcheck failed: %s", exc)
         return None
@@ -190,7 +205,7 @@ async def _confirm_ad(raw_text: str, api_key: Optional[str]) -> Optional[dict]:
             if not isinstance(evidence, str) or len(evidence.strip()) < 8 or evidence not in raw_text[:8000]:
                 return None
         return verdict
-    except gemini.NoKeyError:
+    except (gemini.NoKeyError, gemini.BusyError):
         raise
     except gemini.AIError:
         return None

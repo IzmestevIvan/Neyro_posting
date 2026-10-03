@@ -1,0 +1,14 @@
+[Unit]
+Description=Check primary availability and freshness of verified reserve backups
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/neyro-check-health
+TimeoutStartSec=120s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/neyro-reserve
+PrivateTmp=true
