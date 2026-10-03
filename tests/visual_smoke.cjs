@@ -114,7 +114,7 @@ const assert = require('node:assert/strict');
       await page.locator('#billingBack').click();
       assert.equal(await page.locator('#gate').isVisible(),true);
       await capture(page,width,'gate');
-      await page.evaluate(()=>showOnboarding());
+      await page.evaluate(()=>{boot.user.has_access=true;showOnboarding();});
       await capture(page,width,'onboarding');
       if(width<=390)await page.setViewportSize({width,height:568});
       for (const [language,theme] of [['ru','light'],['en','dark']]) {

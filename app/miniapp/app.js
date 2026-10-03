@@ -29,6 +29,8 @@ let publishingNow = false;
 let subscription = null;
 let billingLoading = false;
 let billingReturnPage = 'home';
+let exploring = false;
+const exploreDisabled = new Map();
 const drafts = new Map();
 const readTicket = (key) => { const token = (revisions[key] || 0) + 1; revisions[key] = token; const id = channel?.id; return () => channel?.id === id && revisions[key] === token; };
 const safeLink = (value) => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
@@ -191,7 +193,7 @@ function setBadge(selector, count) {
 /* ---------- feed ---------- */
 
 async function loadFeed() {
-  if (!channel) return;
+  if (!channel) { if (exploring) renderExploreWorkspace(); return; }
   const current = readTicket('feed');
   const posts = await api(`/channels/${channel.id}/feed`);
   if (!current()) return;
@@ -292,7 +294,7 @@ $('#feed').addEventListener('click', async (event) => {
 /* ---------- ads ---------- */
 
 async function loadAds() {
-  if (!channel) return;
+  if (!channel) { if (exploring) renderExploreWorkspace(); return; }
   const current = readTicket('ads');
   const offers = await api(`/channels/${channel.id}/ads?view=${adsView}`);
   if (!current()) return;
@@ -605,10 +607,13 @@ async function loadBilling() {
     boot.user = {...refreshed.user,has_access:data.status === 'active'};
     if (!channel && refreshed.channels.length) {
       boot.channels = refreshed.channels;
-      channel = boot.channels[0]; renderChannelList(); fillSettings();
+      channel = boot.channels[0];
+      if (exploring) leaveExploreMode();
+      renderChannelList(); fillSettings();
     }
-    $('#nav').hidden = !channel || !boot.user.has_access;
-    $('#channelBar').hidden = !channel || !boot.user.has_access;
+    $('#nav').hidden = (!channel && !exploring) || !boot.user.has_access;
+    $('#channelBar').hidden = (!channel && !exploring) || !boot.user.has_access;
+    if (!channel && !boot.user.has_access && page !== 'billing') showGate();
     renderPlan();
     $('#billingAvailability').textContent = tr('Данные тарифа обновлены.','Your plan is up to date.');
     $('#billingAvailability').hidden = false;
@@ -626,7 +631,7 @@ async function loadBilling() {
 $('#billingRefresh').addEventListener('click', loadBilling);
 $('#billingBack').addEventListener('click', () => {
   if (!boot?.user.has_access) return showGate();
-  if (!channel) return showOnboarding();
+  if (!channel) return exploring ? enterExploreMode(billingReturnPage) : showOnboarding();
   openPage(billingReturnPage);
 });
 
@@ -989,7 +994,7 @@ $('#openAdmin').addEventListener('click', () => {
 $('#closeAdmin').addEventListener('click', () => {
   adminOpen = false;
   if (!boot.user.has_access) return showGate();
-  if (!channel) return showOnboarding();
+  if (!channel) return exploring ? enterExploreMode(page) : showOnboarding();
   $('#nav').hidden = false;
   $('#channelBar').hidden = false;
   openPage(page);
@@ -1040,6 +1045,7 @@ async function createChannel(input, button) {
 }
 
 $('#addChannel').addEventListener('click', () => {
+  if (!channel) return showOnboarding();
   const row = $('#addChannelRow');
   row.hidden = !row.hidden;
   if (!row.hidden) $('#channelInput').focus();
@@ -1115,13 +1121,15 @@ const PAGE_LOADERS = { home: refreshStats, feed: () => feedView === 'pending' ? 
 
 function openPage(name) {
   if (!['home', 'feed', 'ads', 'sources', 'settings', 'billing'].includes(name)) return;
-  if (!channel && name !== 'billing') return;
+  if (!boot?.user.has_access && name !== 'billing') return showGate();
+  if (!channel && name !== 'billing' && !exploring) return;
   if (name === 'billing' && page !== 'billing') billingReturnPage = page;
   page = name;
-  $$('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === (['sources', 'billing'].includes(name) ? 'settings' : name === 'ads' ? 'feed' : name)));
+  $$('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === (name === 'billing' ? 'settings' : name === 'ads' ? 'feed' : name)));
   $$('.page').forEach((s) => (s.hidden = s.id !== `page-${name}`));
+  if (exploring && !channel) renderExploreWorkspace();
   const load = PAGE_LOADERS[name];
-  if (load) Promise.resolve(load()).catch((e) => toast(e.message, true));
+  if (load && (channel || name === 'billing')) Promise.resolve(load()).catch((e) => toast(e.message, true));
 }
 
 $$('.nav button').forEach((b) => b.addEventListener('click', () => openPage(b.dataset.page)));
@@ -1134,6 +1142,8 @@ function showOnly(id) {
 }
 
 function showGate() {
+  exploring = false;
+  document.body.classList.remove('exploring');
   channel = null;
   $('#status').textContent = tr("доступ не активирован","access not active");
   $('#gateHint').textContent = boot.user.access_until
@@ -1142,13 +1152,27 @@ function showGate() {
 }
 
 function showOnboarding() {
+  if (!boot?.user.has_access) return showGate();
   channel = null;
   $('#status').textContent = tr("канал ещё не подключён","no channel connected yet");
   $('#botName').textContent = boot.bot_username ? `@${boot.bot_username}` : tr("бота","the bot");
   showOnly('onboarding');
 }
 
+function leaveExploreMode() {
+  if (exploreDisabled.size) $('#saveStatus').innerHTML = `<span data-i18n="Переключатели сохраняются сразу." data-i18n-en="Changes to switches are saved immediately.">${tr('Переключатели сохраняются сразу.','Changes to switches are saved immediately.')}</span>`;
+  exploring = false;
+  document.body.classList.remove('exploring');
+  for (const [el,disabled] of exploreDisabled) el.disabled = disabled;
+  exploreDisabled.clear();
+  $('#exploreHome').hidden = true;
+  $('#homeConnected').hidden = false;
+  $$('[data-explore-notice]').forEach(el => el.hidden = true);
+  $('#channelSelect').disabled = false;
+}
+
 function enterNormalMode() {
+  leaveExploreMode();
   $('#gate').hidden = true;
   $('#onboarding').hidden = true;
   $('#nav').hidden = false;
@@ -1158,6 +1182,69 @@ function enterNormalMode() {
   openPage('home');
   loadAds().catch(() => {});
 }
+
+/* An account can explore the real workspace without creating a channel. */
+function exploreWasChosen() {
+  try { return localStorage.getItem(`neyro:explore:${boot.user.tg_id}`) === '1'; } catch { return false; }
+}
+function enterExploreMode(name = 'home') {
+  if (!boot?.user.has_access) return showGate();
+  if (channel) return openPage(name);
+  exploring = true;
+  try { localStorage.setItem(`neyro:explore:${boot.user.tg_id}`, '1'); } catch {}
+  document.body.classList.add('exploring');
+  $('#nav').hidden = false;
+  $('#channelBar').hidden = false;
+  $('#addChannelRow').hidden = true;
+  openPage(name);
+}
+function renderExploreWorkspace() {
+  if (channel || !boot?.user.has_access) return;
+  $('#homeConnected').hidden = true;
+  $('#exploreHome').hidden = false;
+  $('#status').textContent = tr('Ваша редакция','Your workspace');
+  $('#channelSelect').innerHTML = `<option>${tr('Канал пока не подключён','No channel connected yet')}</option>`;
+  $('#channelSelect').disabled = true;
+  $('#exploreHome').innerHTML = `
+    <div class="explore-intro"><div><span class="eyebrow">${tr('СНАЧАЛА ОСМОТРИТЕСЬ','MAKE YOURSELF AT HOME')}</span><h2>${tr('Ваша новая<br>редакция.','Your new<br>workspace.')}</h2><p>${tr('Здесь материалы превращаются в публикации. Изучите инструменты в своём темпе — канал подключите, когда будете готовы.','This is where source material becomes a published post. Explore the tools at your own pace, then connect a channel when you are ready.')}</p><div class="explore-actions"><button class="accent" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button><button class="text-link" data-explore-tutorial>${tr('Как всё работает','How it works')} ${icon('back')}</button></div></div><div class="editorial-index" aria-hidden="true"><span>N / P</span><div></div><small>${tr('МАТЕРИАЛ → ПОСТ','SOURCE → POST')}</small></div></div>
+    <div class="explore-section-head"><h3>${tr('От источника до публикации','From source to publication')}</h3><span>01 — 03</span></div>
+    <div class="workflow-list">${[
+      ['sources','01',tr('Соберите свои источники','Bring your sources'),tr('Telegram-каналы и RSS. Вы решаете, откуда брать материалы.','Telegram channels and RSS. You decide where content comes from.'),'sources'],
+      ['settings','02',tr('Задайте голос канала','Set your channel’s voice'),tr('Темы, стиль, язык и расписание — под вашу редакционную задачу.','Topics, tone, language and schedule — shaped around your editorial needs.'),'settings'],
+      ['feed','03',tr('Проверьте и опубликуйте','Review and publish'),tr('Читайте черновики, вносите правки и выбирайте, что увидят подписчики.','Read drafts, make changes and choose what your subscribers see.'),'inbox']
+    ].map(([go,num,title,copy,ico])=>`<button class="workflow-row" data-go="${go}"><span class="workflow-number">${num}</span><span class="workflow-copy"><b>${title}</b><small>${copy}</small></span>${icon(ico)}${icon('back')}</button>`).join('')}</div>
+    <button class="explore-access" data-go="billing"><span>${icon('key')} ${tr('Ваш доступ уже активен','Your access is active')}</span><span>${tr('Тариф и лимиты','Plan and limits')} ${icon('back')}</span></button>`;
+  const descriptions = {
+    feed:tr('Здесь появятся черновики и история публикаций. Для начала подключите канал и добавьте источники.','Drafts and publishing history will appear here. Connect a channel and add sources to get started.'),
+    sources:tr('Источники подключаются к конкретному каналу. Пока можно посмотреть, как они добавляются.','Sources belong to a specific channel. You can explore the available ways to add them.'),
+    settings:tr('Изучите настройки канала. Их можно будет изменить после подключения. Тему и язык интерфейса меняйте уже сейчас в шапке.','Explore the channel settings. Connect a channel to edit them. You can already change the interface theme and language in the header.'),
+    ads:tr('Здесь будут материалы, которые фильтр посчитал рекламой. Решение можно проверить вручную.','Content flagged as advertising will appear here for your review.')
+  };
+  $$('[data-explore-notice]').forEach(el=>{el.hidden=false;el.innerHTML=`<p>${descriptions[el.dataset.exploreNotice]}</p><button class="text-link" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button>`;});
+  const empty = (title,copy) => `<div class="workspace-empty">${icon('inbox')}<h3>${title}</h3><p>${copy}</p></div>`;
+  $('#feed').innerHTML=empty(tr('Место для хороших материалов','A place for good stories'),tr('После подключения здесь будут посты, подготовленные для вашей проверки.','Once connected, posts prepared for your review will appear here.'));
+  $('#history').innerHTML=empty(tr('История начнётся с первого поста','Your story starts with the first post'),tr('Статус обработки и результат публикации сохранятся здесь.','Processing status and publishing results will be recorded here.'));
+  $('#ads').innerHTML=empty(tr('Пока нет материалов','No content yet'),tr('Сначала подключите канал и источники.','Connect a channel and sources first.'));
+  $('#sources').innerHTML='';
+  $('#pendingCount').textContent='0';
+  $('#sourcesCount').textContent='0';
+  $('#adsCount').textContent='0';
+  setBadge('#feedBadge',0);setBadge('#adsBadge',0);
+  $('#saveStatus').textContent=tr('Обзор настроек · подключите канал, чтобы сохранять изменения.','Settings preview · connect a channel to save changes.');
+  $('#qualityTitle').textContent=tr('Качество обработки','Processing quality');
+  $('#qualityHint').textContent=tr('От быстрого рерайта до глубокой проверки фактов. Выберите режим после подключения канала.','From a quick rewrite to an additional fact check. Choose a mode after connecting your channel.');
+  $('#delayChips').innerHTML=DELAY_LABELS.map(([,ru,en])=>`<span class="preview-chip">${tr(ru,en)}</span>`).join('');
+  $('#paceChips').innerHTML=PACE_LABELS.map(([,ru,en])=>`<span class="preview-chip">${tr(ru,en)}</span>`).join('');
+  $$('#page-settings input,#page-settings select,#page-settings textarea,#page-settings button:not([data-go]):not([data-tutorial]):not([data-connect-channel]),#page-sources input,#page-sources select,#page-sources textarea,#page-sources button:not([data-go]):not([data-connect-channel]):not(#sourceBatchOpen):not(#sourceCopyOpen)').forEach(el=>{
+    if(!exploreDisabled.has(el)) exploreDisabled.set(el,el.disabled);
+    el.disabled=true;
+  });
+}
+$('#skipChannel').addEventListener('click',()=>enterExploreMode());
+$('#app').addEventListener('click',event=>{
+  if(event.target.closest('[data-connect-channel]')) showOnboarding();
+  if(event.target.closest('[data-explore-tutorial]')) setupTour();
+});
 
 /* ---------- guided tutorial ---------- */
 
@@ -1312,7 +1399,12 @@ function openTutorialSection(action) {
   closeTour();
   if (action === 'billing') { openPage('billing'); return; }
   if (!boot?.user.has_access) { showGate(); toast(copy.activateFirst); return; }
-  if (!channel) { showOnboarding(); $('#firstChannelInput').focus(); if(action!=='channel') toast(copy.connectFirst); return; }
+  if (!channel) {
+    if (action === 'channel') { showOnboarding(); $('#firstChannelInput').focus(); return; }
+    enterExploreMode(action === 'history' ? 'feed' : action);
+    if (action === 'history') switchFeed('history');
+    return;
+  }
   if (action === 'channel') { $('#channelSelect').focus(); return; }
   if (action === 'history') { openPage('feed'); switchFeed('history'); return; }
   openPage(action);
@@ -1378,7 +1470,8 @@ function refreshInterfaceLanguage() {
   if (!boot) return;
   renderPlan();
   if (!channel) {
-    $('#status').textContent = boot.user.has_access ? tr('канал ещё не подключён','no channel connected yet') : tr('доступ не активирован','access not active');
+    if (exploring && boot.user.has_access) renderExploreWorkspace();
+    else $('#status').textContent = boot.user.has_access ? tr('канал ещё не подключён','no channel connected yet') : tr('доступ не активирован','access not active');
     $('#botName').textContent = boot.bot_username ? `@${boot.bot_username}` : tr('бота','the bot');
     if (boot.user.access_until) $('#gateHint').textContent = tr(`Прошлый доступ закончился ${formatDate(boot.user.access_until)}.`,`Your previous access ended on ${formatDate(boot.user.access_until)}.`);
     return;
@@ -1451,7 +1544,7 @@ async function start() {
   }, 15000);
 
   if (!boot.user.has_access) return showGate();
-  if (!boot.channels.length) return showOnboarding();
+  if (!boot.channels.length) return exploreWasChosen() ? enterExploreMode() : showOnboarding();
 
   channel = boot.channels[0];
   enterNormalMode();
@@ -1460,7 +1553,7 @@ async function start() {
 $('#app').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });
 const HISTORY_LABELS = { get expired(){return tr("Устарел","Expired");}, get published(){return tr("Опубликован","Published");}, get failed(){return tr("Ошибка публикации","Publishing error");}, get filtered(){return tr("Отфильтрован","Filtered");}, get duplicate(){return tr("Дубликат","Duplicate");}, get rejected(){return tr("Отклонён","Rejected");}, get approved(){return tr("В очереди","Queued");}, get new(){return tr("Обрабатывается","Processing");}, get digest(){return tr("В дайджесте","In digest");}, get publishing(){return tr("Отправляется","Sending");}, get uncertain(){return tr("Нужна сверка с каналом","Verify delivery in channel");}, get partial(){return tr("Отправлена только часть","Partially delivered");}, get digest_item(){return tr("Включён в дайджест","Included in digest");} };
 async function loadHistory() {
-  if (!channel) return;
+  if (!channel) { if (exploring) renderExploreWorkspace(); return; }
   const current = readTicket('history');
   const rows = await api(`/channels/${channel.id}/history`);
   if (!current()) return;

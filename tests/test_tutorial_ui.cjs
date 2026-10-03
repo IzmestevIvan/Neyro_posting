@@ -44,7 +44,8 @@ const assert = require('node:assert/strict');
     await page.locator('#openTutorial').click();
     assert.equal(await page.locator('.tutorial-section').getAttribute('data-topic'),'sources');
     await page.locator('.tutorial-action').click();
-    assert.equal(await page.locator('#onboarding').isVisible(),true);
+    assert.equal(await page.locator('#page-sources').isVisible(),true);
+    assert.equal(await page.locator('#sourceInput').isDisabled(),true);
     assert.equal(await page.locator('#tour').isVisible(),false);
     // Gate remains accessible; the guide never grants access or mutates a channel.
     await page.evaluate(()=>{boot.user.has_access=false;showGate();});

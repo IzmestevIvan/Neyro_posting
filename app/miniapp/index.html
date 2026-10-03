@@ -120,12 +120,16 @@
       </ol>
       <input type="text" id="firstChannelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off" data-i18n-placeholder="@username канала" data-i18n-placeholder-en="Channel @username">
       <button id="firstChannelSubmit" class="accent wide"><span data-i18n="Добавить канал" data-i18n-en="Add channel">Добавить канал</span></button>
+      <button id="skipChannel" class="ghost wide" data-i18n="Пропустить — изучить приложение" data-i18n-en="Skip — explore the app">Пропустить — изучить приложение</button>
+      <p class="hint onboarding-optional" data-i18n="Канал можно подключить позже. Ваш доступ уже активен." data-i18n-en="Connect a channel later. Your activated access is already available.">Канал можно подключить позже. Ваш доступ уже активен.</p>
       <button class="text-link" data-tutorial data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</button>
     </div>
   </section>
 
   <!-- главная -->
   <section id="page-home" class="page">
+    <div id="exploreHome" hidden></div>
+    <div id="homeConnected">
     <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ВАШ КАНАЛ" data-i18n-en="YOUR CHANNEL">ВАШ КАНАЛ</span></span><h2><span data-i18n="Всё под рукой" data-i18n-en="Everything in one place">Всё под рукой</span></h2><p class="muted"><span data-i18n="Проверьте посты — и продолжайте свой день." data-i18n-en="Review your posts and get on with your day.">Проверьте посты — и продолжайте свой день.</span></p></div>
     <div id="nextStep" class="next-step" aria-live="polite"></div>
     <div id="statsGrid" class="grid"></div>
@@ -137,10 +141,12 @@
     <p id="channelBlockers" class="notice" role="status" hidden></p>
     <details class="card group analytics"><summary><span><span data-i18n="Статистика за неделю" data-i18n-en="Weekly overview">Статистика за неделю</span></span><svg class="ic chev"><use href="#i-back"/></svg></summary><div class="body"><h3 class="section"><span data-i18n="Публикации" data-i18n-en="Publications">Публикации</span></h3><div id="postsChart" class="chart"></div><h3 class="section"><span data-i18n="Подписчики" data-i18n-en="Subscribers">Подписчики</span></h3><div id="subsChart" class="chart"></div></div></details>
     <details id="queueDetails" class="queue-details" hidden><summary><span data-i18n="Что происходит с материалами" data-i18n-en="Content processing status">Что происходит с материалами</span></summary><p id="queueReason" class="hint"></p></details>
+    </div>
   </section>
 
   <!-- лента -->
   <section id="page-feed" class="page" hidden>
+    <div class="explore-notice" data-explore-notice="feed" hidden></div>
     <div class="workspace-intro"><span class="eyebrow"><span data-i18n="КОНТЕНТ" data-i18n-en="CONTENT">КОНТЕНТ</span></span><h2><span data-i18n="Публикации" data-i18n-en="Publications">Публикации</span></h2></div>
     <div class="feed-tabs" role="group" aria-label="Список публикаций" data-i18n-aria-label="Список публикаций" data-i18n-aria-label-en="Publication list"><button id="showPending" class="on" aria-pressed="true"><span data-i18n="На проверке" data-i18n-en="For review">На проверке</span> <span id="pendingCount">0</span></button><button id="showHistory" aria-pressed="false"><span data-i18n="История" data-i18n-en="History">История</span></button></div>
     <p class="hint"><span data-i18n="Проверьте черновик и нажмите «Опубликовать». Свой текст или ссылку можно отправить боту." data-i18n-en="Review the draft and select Publish. You can send your own text or a link to the bot.">Проверьте черновик и нажмите «Опубликовать». Свой текст или ссылку можно отправить боту.</span></p>
@@ -150,6 +156,7 @@
 
   <!-- реклама -->
   <section id="page-ads" class="page" hidden>
+    <div class="explore-notice" data-explore-notice="ads" hidden></div>
     <button class="back-link" data-go="feed"><svg class="ic"><use href="#i-back"/></svg> <span data-i18n="К публикациям" data-i18n-en="Back to posts">К публикациям</span></button>
     <div class="workspace-intro"><h2><span data-i18n="Отфильтрованная реклама" data-i18n-en="Filtered ads">Отфильтрованная реклама</span></h2><p class="muted"><span data-i18n="Проверьте материалы, которые не попали в ленту." data-i18n-en="Review content that was filtered out of your feed.">Проверьте материалы, которые не попали в ленту.</span></p></div>
     <div class="feed-tabs" role="group" aria-label="Рекламные материалы" data-i18n-aria-label="Рекламные материалы" data-i18n-aria-label-en="Advertising materials"><button id="adsActive" class="on"><span data-i18n="На разбор" data-i18n-en="To review">На разбор</span></button><button id="adsArchive"><span data-i18n="Архив" data-i18n-en="Archive">Архив</span></button></div>
@@ -160,6 +167,7 @@
 
   <!-- источники -->
   <section id="page-sources" class="page" hidden>
+    <div class="explore-notice" data-explore-notice="sources" hidden></div>
     <button class="back-link" data-go="settings"><svg class="ic"><use href="#i-back"/></svg> <span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></button>
     <div class="workspace-intro"><span class="eyebrow"><span data-i18n="МАТЕРИАЛЫ ДЛЯ КАНАЛА" data-i18n-en="CHANNEL CONTENT">МАТЕРИАЛЫ ДЛЯ КАНАЛА</span></span><h2><span data-i18n="Источники" data-i18n-en="Sources">Источники</span> <span id="sourcesCount" class="title-count">0</span></h2><p class="muted"><span data-i18n="Добавьте @канал, ссылку t.me или RSS-ленту." data-i18n-en="Add a @channel, t.me link or RSS feed.">Добавьте @канал, ссылку t.me или RSS-ленту.</span></p></div>
     <div class="source-shortcuts">
@@ -196,6 +204,7 @@
 
   <!-- настройки -->
   <section id="page-settings" class="page" hidden>
+    <div class="explore-notice" data-explore-notice="settings" hidden></div>
     <div class="workspace-intro"><span class="eyebrow"><span data-i18n="ПОД ВАШИ ЗАДАЧИ" data-i18n-en="MAKE IT YOURS">ПОД ВАШИ ЗАДАЧИ</span></span><h2><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></h2><p id="saveStatus" class="hint" role="status"><span data-i18n="Переключатели сохраняются сразу." data-i18n-en="Changes to switches are saved immediately.">Переключатели сохраняются сразу.</span></p></div>
     <div class="settings-shortcuts"><button class="action-tile" data-go="sources"><span class="tile-icon"><svg class="ic"><use href="#i-sources"/></svg></span><span><b><span data-i18n="Источники" data-i18n-en="Sources">Источники</span></b><small><span data-i18n="Добавить и настроить" data-i18n-en="Add and manage">Добавить и настроить</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button><button class="action-tile" data-go="billing"><span class="tile-icon"><svg class="ic"><use href="#i-bolt"/></svg></span><span><b><span data-i18n="Мой тариф" data-i18n-en="My plan">Мой тариф</span></b><small><span data-i18n="Посмотреть лимиты" data-i18n-en="View limits">Посмотреть лимиты</span></small></span><svg class="ic forward"><use href="#i-back"/></svg></button></div>
     <a id="supportLink" class="ghost support-link" hidden target="_blank" rel="noopener noreferrer"><span data-i18n="Написать в поддержку" data-i18n-en="Contact support">Написать в поддержку</span> <span aria-hidden="true">↗</span></a>
@@ -424,6 +433,7 @@
   <nav class="nav" id="nav" aria-label="Основная навигация" data-i18n-aria-label="Основная навигация" data-i18n-aria-label-en="Main navigation">
     <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span><span data-i18n="Главная" data-i18n-en="Home">Главная</span></span></button>
     <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span><span data-i18n="Посты" data-i18n-en="Posts">Посты</span></span><i id="feedBadge" class="badge" hidden></i></button>
+    <button data-page="sources"><svg class="ic"><use href="#i-sources"/></svg><span data-i18n="Источники" data-i18n-en="Sources">Источники</span></button>
     <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></span></button>
   </nav>
 </main>
