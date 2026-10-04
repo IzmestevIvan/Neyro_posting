@@ -174,13 +174,6 @@
         group: root
         mode: '0755'
       loop: [neyro-release.py, neyro-deploy-dispatch.py]
-    - name: Keep encrypted backup export compatible with locked requirements
-      ansible.builtin.copy:
-        src: ../../scripts/resilience/export-backup.sh
-        dest: /usr/local/sbin/neyro-export-backup
-        owner: root
-        group: root
-        mode: '0755'
     - name: Configure the permitted health endpoint
       ansible.builtin.copy:
         dest: /etc/neyro-deploy/config.json

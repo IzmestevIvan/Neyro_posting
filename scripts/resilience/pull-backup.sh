@@ -24,16 +24,35 @@ primary=$(cat "$config/primary")
 ssh "${ssh_args[@]}" "$primary" snapshot > "$stage/snapshot.tar.gz.age"
 age -d -i "$config/backup.agekey" "$stage/snapshot.tar.gz.age" | tar xzf - -C "$stage" ./database.dump ./image-id ./proxy-image-id ./snapshot-time ./SHA256SUMS
 (cd "$stage" && sha256sum --check SHA256SUMS >/dev/null)
+# Prefer the last verified snapshot identity over the dormant deployment tag.
+# The standby tag deliberately stays unchanged until an explicit restore.
+image_base() {
+  local kind=$1 base
+  if test -s "$root/$kind"; then
+    base=$(cat "$root/$kind")
+  elif test -e "$root/latest.age"; then
+    base=$(age -d -i "$config/backup.agekey" "$root/latest.age" | tar xzOf - "./$2")
+  else
+    base=$(docker image inspect neyro-posting:latest --format '{{.Id}}')
+  fi
+  [[ "$base" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  docker image inspect "$base" >/dev/null
+  printf '%s\n' "$base"
+}
 image_id=$(cat "$stage/image-id")
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$image_id" >/dev/null 2>&1; then
-  ssh "${ssh_args[@]}" "$primary" image | age -d -i "$config/backup.agekey" | docker image load >/dev/null
+  base_id=$(image_base app-image-id image-id)
+  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $image_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$image_id"
   docker image inspect "$image_id" >/dev/null
 fi
 proxy_id=$(cat "$stage/proxy-image-id")
 [[ "$proxy_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$proxy_id" >/dev/null 2>&1; then
-  ssh "${ssh_args[@]}" "$primary" proxy-image | age -d -i "$config/backup.agekey" | docker image load >/dev/null
+  base_id=$(image_base proxy-image-id proxy-image-id)
+  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $proxy_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$proxy_id"
   docker image inspect "$proxy_id" >/dev/null
 fi
 # Restore into a disposable, network-isolated PostgreSQL. Never invoke the bot.
@@ -53,6 +72,8 @@ docker exec "$container" psql -U postgres -d restorecheck -v ON_ERROR_STOP=1 -At
 # Publish only a fully verified archive. Retention is controlled on reserve only.
 mv "$stage/snapshot.tar.gz.age" "$root/snapshots/$stamp.tar.gz.age"
 cp "$stage/restore-counts" "$root/last-restore-counts"
+cp "$stage/image-id" "$root/app-image-id"
+cp "$stage/proxy-image-id" "$root/proxy-image-id"
 printf '%s\n' "$stamp" > "$root/last-success.tmp"
 mv "$root/last-success.tmp" "$root/last-success"
 ln -sfn "snapshots/$stamp.tar.gz.age" "$root/latest.age"

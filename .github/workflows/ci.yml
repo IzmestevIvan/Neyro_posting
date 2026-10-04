@@ -66,10 +66,11 @@ jobs:
       - run: python -m pip install ansible-core==2.19.3 PyYAML==6.0.3
       - run: ansible-galaxy collection install -r infra/ansible/requirements.yml
       - run: python scripts/ci/repository_check.py
-      - run: python -m unittest tests.test_release_tooling tests.test_incident_response -v
-      - run: bash -n deploy.sh scripts/deploy/client.sh
+      - run: python -m unittest tests.test_release_tooling tests.test_incident_response tests.test_image_transfer -v
+      - run: bash -n deploy.sh scripts/deploy/client.sh scripts/resilience/*.sh
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/site.yml --syntax-check
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/operations.yml --syntax-check
+      - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup-transfer.yml --syntax-check
       - run: python scripts/ci/check_infrastructure.py
       - name: Render Kubernetes preparation
         run: kubectl kustomize infra/kubernetes > /tmp/kubernetes.yml

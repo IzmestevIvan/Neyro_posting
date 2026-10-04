@@ -50,8 +50,10 @@ const assert=require('node:assert/strict');
   assert.equal(account.url(),'https://plan.test/account?plan=pro#plans');
   await account.locator('[data-plan]').last().waitFor({state:'visible'});
   assert.equal(await account.locator('[data-plan]').count(),5);
-  assert.equal(await account.locator('#accountPlans [data-plan="pro"]').isEnabled(),true);
   await account.locator('#accountQuote').waitFor({state:'visible'});
+  // Automatic quote calculation briefly disables plan buttons. Wait for its
+  // observable result before checking the final interactive state.
+  assert.equal(await account.locator('#accountPlans [data-plan="pro"]').isEnabled(),true);
   assert.match(await account.locator('#quoteSummary').innerText(),/PRO/);
   await account.close();
   accountAuthenticated=false;
