@@ -1,0 +1,11 @@
+[Unit]
+Description=Enforce public port policy for Docker forwarded traffic
+After=docker.service ufw.service
+Requires=docker.service
+PartOf=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/neyro-docker-ingress
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target docker.service

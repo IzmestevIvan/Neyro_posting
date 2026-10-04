@@ -1,0 +1,41 @@
+---
+- name: Verify reserve credentials already provisioned outside Git
+  ansible.builtin.stat:
+    path: '/etc/neyro-reserve/{{ item }}'
+  loop: [alerts.json, backup.agekey, pull_key, known_hosts, primary, health-url]
+  register: reserve_credentials
+- name: Require the existing encrypted backup identity
+  ansible.builtin.assert:
+    that: item.stat.exists and item.stat.isreg
+    fail_msg: Provision reserve credentials securely before applying this playbook.
+  loop: '{{ reserve_credentials.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+- name: Enforce private backup credentials
+  ansible.builtin.file:
+    path: '/etc/neyro-reserve/{{ item.item }}'
+    owner: root
+    group: root
+    mode: '0600'
+  loop: '{{ reserve_credentials.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+- name: Install current reserve procedures without starting workers
+  ansible.builtin.copy:
+    src: '../../../scripts/resilience/{{ item.src }}'
+    dest: '/usr/local/sbin/{{ item.dest }}'
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - {src: pull-backup.sh, dest: neyro-pull-backup}
+    - {src: check-health.py, dest: neyro-check-health}
+    - {src: prepare-standby.sh, dest: neyro-prepare-standby}
+    - {src: refresh-standby.sh, dest: neyro-refresh-standby}
+- name: Install reserve services and timers
+  ansible.builtin.copy:
+    src: '../../../scripts/resilience/{{ item }}'
+    dest: '/etc/systemd/system/{{ item }}'
+    mode: '0644'
+  loop: [neyro-backup.service, neyro-backup.timer, neyro-monitor.service, neyro-monitor.timer]
+  notify: Reload systemd

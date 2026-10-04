@@ -1,0 +1,8 @@
+[Unit]
+Description=Check NeuroPost local services and security every minute
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=5s
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,53 @@
+---
+- name: Explicit operational procedure (read-only status by default)
+  hosts: all
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    operation: status
+  tasks:
+    - name: Validate the requested procedure
+      ansible.builtin.assert:
+        that:
+          - operation in ['status', 'backup', 'maintenance_on', 'maintenance_off', 'restart_app', 'fence_primary', 'prepare_reserve']
+          - operation not in ['restart_app', 'fence_primary'] or ansible_play_hosts_all | difference(groups['primary']) | length == 0
+          - operation not in ['backup', 'prepare_reserve'] or ansible_play_hosts_all | difference(groups['reserve']) | length == 0
+        fail_msg: Limit worker operations to primary and backup/restore operations to reserve.
+    - name: Read redacted health and security observations
+      ansible.builtin.command: /usr/local/sbin/neyro-ops-monitor --observe-only
+      register: status
+      changed_when: false
+      check_mode: false
+    - name: Show observations without environment or token contents
+      ansible.builtin.debug:
+        msg: '{{ status.stdout | from_json }}'
+    - name: Perform an explicit guarded host operation
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/neyro-ops-control, '{{ operation }}']
+      when: operation in ['maintenance_on', 'maintenance_off', 'restart_app', 'fence_primary']
+      changed_when: true
+    - name: Request a verified encrypted snapshot
+      ansible.builtin.systemd_service:
+        name: neyro-backup.service
+        state: started
+      when: operation == 'backup'
+    - name: Read the latest verified backup timestamp
+      ansible.builtin.command: cat /var/lib/neyro-reserve/last-success
+      changed_when: false
+      register: latest_backup
+      when: '"reserve" in group_names'
+    - name: Show verified backup identity
+      ansible.builtin.debug:
+        var: latest_backup.stdout
+      when: '"reserve" in group_names'
+    - name: Require deliberate acceptance of replacing the dormant reserve database
+      ansible.builtin.assert:
+        that: replace_dormant_reserve | default(false) | bool
+        fail_msg: Review the snapshot and pass replace_dormant_reserve=true to restore the dormant database. No workers will start.
+      when: operation == 'prepare_reserve'
+    - name: Refresh only the dormant reserve and pause all restored channels
+      ansible.builtin.command: /usr/local/sbin/neyro-refresh-standby
+      when: operation == 'prepare_reserve'
+      changed_when: true

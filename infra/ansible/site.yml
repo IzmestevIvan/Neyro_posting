@@ -37,6 +37,12 @@
           PermitRootLogin prohibit-password
           MaxAuthTries 3
           LoginGraceTime 30
+          PermitEmptyPasswords no
+          X11Forwarding no
+          AllowAgentForwarding no
+          AllowTcpForwarding no
+          MaxSessions 3
+          LogLevel VERBOSE
       notify: [Validate SSH, Reload SSH]
     - name: Never reboot automatically during a security update
       ansible.builtin.copy:
@@ -78,6 +84,34 @@
       loop_control:
         label: '{{ item.item }}'
       when: item.stat.exists
+    - name: Manage local operations and incident response
+      ansible.builtin.import_tasks: tasks/operations.yml
+    - name: Manage firewall, audit and host security
+      ansible.builtin.import_tasks: tasks/security.yml
+    - name: Manage reserve protection and backup procedures
+      ansible.builtin.import_tasks: tasks/reserve.yml
+      when: '"reserve" in group_names'
+    - name: Apply validated service configuration
+      ansible.builtin.meta: flush_handlers
+    - name: Enable persistent Docker ingress protection
+      ansible.builtin.systemd_service:
+        name: neyro-docker-ingress.service
+        enabled: true
+        state: started
+      when: not ansible_check_mode
+    - name: Enable local incident monitoring
+      ansible.builtin.systemd_service:
+        name: neyro-ops.timer
+        enabled: true
+        state: started
+      when: not ansible_check_mode
+    - name: Enable reserve backup and external monitoring
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop: [neyro-backup.timer, neyro-monitor.timer]
+      when: '"reserve" in group_names'
     - name: Check current service health
       ansible.builtin.command: systemctl is-active docker ssh fail2ban
       changed_when: false
@@ -88,6 +122,25 @@
       check_mode: false
       when: "'reserve' in group_names"
   handlers:
+    - name: Apply Docker ingress protection
+      ansible.builtin.systemd_service:
+        name: neyro-docker-ingress.service
+        daemon_reload: true
+        state: restarted
+      when: not ansible_check_mode
+    - name: Restart fail2ban
+      ansible.builtin.systemd_service:
+        name: fail2ban
+        state: restarted
+    - name: Reload audit configuration
+      ansible.builtin.command: auditctl --signal reload
+      changed_when: true
+    - name: Load audit rules
+      ansible.builtin.command: augenrules --load
+      changed_when: true
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
     - name: Validate SSH
       ansible.builtin.command: /usr/sbin/sshd -t
       changed_when: false

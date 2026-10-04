@@ -138,7 +138,7 @@ class ReleaseRecovery(unittest.TestCase):
         self.env = self.root/'.app.env'
         self.env.write_text('BILLING_ENABLED=0\n')
         make_archive(self.state/'uploads'/f'{SHA}.tar.gz',fixture_files())
-        for attribute,value in [('ROOT',self.root),('STATE',self.state),('LOCKS',self.locks),('RESERVE_MARKER',self.base/'reserve')]:
+        for attribute,value in [('ROOT',self.root),('STATE',self.state),('LOCKS',self.locks),('RESERVE_MARKER',self.base/'reserve'),('OPERATIONS',self.base/'operations')]:
             patcher=patch.object(release,attribute,value);patcher.start();self.addCleanup(patcher.stop)
         patcher=patch.object(release,'verify_approved_source');patcher.start();self.addCleanup(patcher.stop)
         patcher=patch.object(release,'capture',side_effect=lambda args: 'sha256:old-support' if args[-1]=='neyro-support-1' else 'sha256:old-app')
@@ -183,6 +183,17 @@ class ReleaseRecovery(unittest.TestCase):
                 release.deploy(SHA)
         self.assertEqual((self.root/'app/main.py').read_bytes(),b'old app')
         self.assertFalse(any('up' in args for args in self.commands))
+
+    def test_maintenance_and_fence_refuse_release_before_backup_or_build(self):
+        release.OPERATIONS.mkdir()
+        for marker in ('maintenance', 'FENCED'):
+            path = release.OPERATIONS / marker
+            path.touch()
+            with patch.object(release, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'guard'):
+                    release.deploy(SHA)
+                run.assert_not_called()
+            path.unlink()
 
     def test_schema_change_or_reserve_stops_before_backup_or_build(self):
         (self.root/'app/db.py').write_bytes(b'other schema')
