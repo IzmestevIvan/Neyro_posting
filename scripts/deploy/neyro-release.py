@@ -19,6 +19,7 @@ ROOT = Path('/opt/neyro')
 STATE = Path('/var/lib/neyro-deploy')
 LOCKS = Path('/run/lock')
 RESERVE_MARKER = Path('/etc/neyro-reserve')
+OPERATIONS = Path('/etc/neyro-ops')
 REPOSITORY = 'IzmestevIvan/Neyro_posting'
 SCHEMA_FILES = ('app/db.py', 'app/billing/schema.py')
 SYNC_PATHS = ('app', 'scripts', 'docs', 'Dockerfile', 'requirements.txt', 'requirements.lock', 'requirements-dev.txt', '.dockerignore', 'README.md')
@@ -165,6 +166,8 @@ def deploy(commit):
         verify_approved_source(commit, files)
         if RESERVE_MARKER.exists():
             raise RuntimeError('Deployment on a reserve is forbidden')
+        if any((OPERATIONS / name).exists() for name in ('FENCED', 'maintenance')):
+            raise RuntimeError('Release blocked by the operations maintenance/fencing guard')
         for name in SCHEMA_FILES:
             if (ROOT / name).read_bytes() != files[name]:
                 raise RuntimeError('Schema changes require a separate reviewed migration')

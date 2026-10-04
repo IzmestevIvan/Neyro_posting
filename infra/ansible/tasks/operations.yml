@@ -1,0 +1,69 @@
+---
+- name: Create private operations configuration and state
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop: [/etc/neyro-ops, /var/lib/neyro-ops]
+- name: Read existing authorized Telegram configuration from the reserve privately
+  ansible.builtin.slurp:
+    src: /etc/neyro-reserve/alerts.json
+  delegate_to: '{{ groups["reserve"][0] }}'
+  register: existing_alerts
+  no_log: true
+- name: Install private operations alert credentials
+  ansible.builtin.copy:
+    dest: /etc/neyro-ops/alerts.json
+    content: '{{ existing_alerts.content | b64decode }}'
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+- name: Install operations and alert programs
+  ansible.builtin.copy:
+    src: '{{ item.src }}'
+    dest: '/usr/local/sbin/{{ item.dest }}'
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - {src: '../../../scripts/operations/monitor.py', dest: neyro-ops-monitor}
+    - {src: '../../../scripts/operations/control.py', dest: neyro-ops-control}
+    - {src: '../../../scripts/resilience/alerts.py', dest: neyro_alerts.py}
+- name: Configure host role and limited recovery
+  ansible.builtin.copy:
+    dest: /etc/neyro-ops/config.json
+    mode: '0600'
+    content: '{{ {"role": "primary" if "primary" in group_names else "reserve", "auto_recover": "primary" in group_names} | to_nice_json }}'
+- name: Install local monitoring service and timer
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: '/etc/systemd/system/{{ item }}'
+    mode: '0644'
+  loop: [neyro-ops.service, neyro-ops.timer]
+  notify: Reload systemd
+- name: Inspect the obsolete failed Glances container
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, '{% raw %}{{json .Config.Image}}{% endraw %}', heuristic_solomon]
+  register: obsolete_monitor
+  changed_when: false
+  failed_when: obsolete_monitor.rc not in [0, 1]
+  check_mode: false
+  when: '"primary" in group_names'
+- name: Inspect obsolete monitor restart policy
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, '{% raw %}{{.HostConfig.RestartPolicy.Name}} {{.State.Status}}{% endraw %}', heuristic_solomon]
+  register: obsolete_policy
+  changed_when: false
+  check_mode: false
+  when: '"primary" in group_names and obsolete_monitor.rc == 0 and obsolete_monitor.stdout == ''"nicolargo/glances"'''
+- name: Retain but disable the known broken legacy monitor
+  ansible.builtin.command:
+    argv: '{{ item }}'
+  loop:
+    - [docker, update, --restart=no, heuristic_solomon]
+    - [docker, stop, --time, '10', heuristic_solomon]
+  when: '"primary" in group_names and obsolete_policy is not skipped and obsolete_policy.stdout != "no exited"'
+  changed_when: true

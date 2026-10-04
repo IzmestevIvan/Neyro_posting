@@ -85,7 +85,7 @@ def clean_state(value, now):
     }
 
 
-def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/neyro-reserve/alerts.json')):
+def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/neyro-reserve/alerts.json'), *, labels=None, source=None):
     config = load_config(config_path)
     if config is None:
         return
@@ -98,7 +98,7 @@ def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/n
         print('Alert state is unavailable or invalid; restarting observation counters')
         previous = {}
     now = time.time()
-    labels = {'primary_healthy': 'основной сервер недоступен', 'backup_fresh': 'нет свежей проверенной резервной копии'}
+    labels = labels or {'primary_healthy': 'основной сервер недоступен', 'backup_fresh': 'нет свежей проверенной резервной копии'}
     result = {'version': 2, 'recipients': {}}
     recipients = previous.get('recipients', {})
     if not isinstance(recipients, dict):
@@ -116,6 +116,8 @@ def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/n
             if event:
                 text = ('NeuroPost: ' + label + '. Проверка с резервного сервера. Автоматическое переключение не выполнялось.'
                         if event == 'failure' else 'NeuroPost: восстановлено — ' + ('основной сервер доступен.' if key == 'primary_healthy' else 'проверенная резервная копия свежая.'))
+                if source:
+                    text = f'NeuroPost [{source}]: ' + (f'требует внимания — {label}.' if event == 'failure' else f'проверка снова в норме — {label}.')
                 if send(text, {'token': config['token'], 'admin_ids': [admin]}):
                     current['sent_at'] = now
                 else:

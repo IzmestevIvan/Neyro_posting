@@ -1,0 +1,124 @@
+---
+- name: Install low overhead firewall and audit tools
+  ansible.builtin.apt:
+    name: [ufw, auditd]
+    state: present
+- name: Allow required public TCP ports before enabling the firewall
+  community.general.ufw:
+    rule: allow
+    port: '{{ item }}'
+    proto: tcp
+  loop: '{{ [22, 80, 443] if "primary" in group_names else [22] }}'
+- name: Keep the reserve inaccessible over HTTP
+  community.general.ufw:
+    rule: allow
+    port: '{{ item }}'
+    proto: tcp
+    delete: true
+  loop: [80, 443]
+  when: '"reserve" in group_names'
+- name: Deny unsolicited inbound traffic
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+- name: Preserve outbound connections for Telegram, AI and security updates
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+- name: Enable the managed firewall
+  community.general.ufw:
+    state: enabled
+    logging: low
+- name: Manage SSH brute force blocking
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/sshd.local
+    mode: '0644'
+    content: |
+      [sshd]
+      enabled = true
+      backend = systemd
+      maxretry = 4
+      findtime = 10m
+      bantime = 1h
+      bantime.increment = true
+      bantime.maxtime = 1d
+  notify: Restart fail2ban
+- name: Apply compatible network and kernel hardening
+  ansible.posix.sysctl:
+    name: '{{ item.key }}'
+    value: '{{ item.value }}'
+    sysctl_file: /etc/sysctl.d/90-neyro.conf
+    reload: true
+    sysctl_set: true
+  loop: '{{ neyro_sysctls | dict2items }}'
+  vars:
+    neyro_sysctls:
+      net.ipv4.tcp_syncookies: '1'
+      net.ipv4.conf.all.accept_redirects: '0'
+      net.ipv4.conf.default.accept_redirects: '0'
+      net.ipv4.conf.all.send_redirects: '0'
+      net.ipv4.conf.default.send_redirects: '0'
+      net.ipv6.conf.all.accept_redirects: '0'
+      net.ipv6.conf.default.accept_redirects: '0'
+      net.ipv4.conf.all.accept_source_route: '0'
+      net.ipv4.conf.default.accept_source_route: '0'
+      kernel.kptr_restrict: '2'
+      kernel.dmesg_restrict: '1'
+      fs.protected_hardlinks: '1'
+      fs.protected_symlinks: '1'
+- name: Enable daily security update checks
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+- name: Detect whether auditd is already installed during a first dry run
+  ansible.builtin.stat:
+    path: /etc/audit/auditd.conf
+  register: audit_config
+- name: Bound audit disk use without recording secret contents
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^{{ item.key }}\s*='
+    line: '{{ item.key }} = {{ item.value }}'
+  loop:
+    - {key: max_log_file, value: '16'}
+    - {key: num_logs, value: '4'}
+    - {key: max_log_file_action, value: ROTATE}
+    - {key: space_left_action, value: SYSLOG}
+    - {key: admin_space_left_action, value: SYSLOG}
+    - {key: disk_full_action, value: SYSLOG}
+    - {key: disk_error_action, value: SYSLOG}
+  when: not ansible_check_mode or audit_config.stat.exists
+  notify: Reload audit configuration
+- name: Record identity and security configuration changes
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/neyro.rules
+    mode: '0640'
+    content: |
+      -w /etc/passwd -p wa -k neyro_identity
+      -w /etc/group -p wa -k neyro_identity
+      -w /etc/shadow -p wa -k neyro_identity
+      -w /etc/ssh/ -p wa -k neyro_access
+      -w /root/.ssh/ -p wa -k neyro_access
+      -w /etc/ufw/ -p wa -k neyro_firewall
+      -w /etc/systemd/system/ -p wa -k neyro_services
+      -w /etc/neyro-ops/ -p wa -k neyro_operations
+  when: not ansible_check_mode or audit_config.stat.exists
+  notify: Load audit rules
+- name: Keep auditing active
+  ansible.builtin.systemd_service:
+    name: auditd
+    enabled: true
+    state: started
+  when: not ansible_check_mode or audit_config.stat.exists
+- name: Install persistent protection for Docker published ports
+  ansible.builtin.template:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    mode: '{{ item.mode }}'
+  loop:
+    - {src: neyro-docker-ingress.j2, dest: /usr/local/sbin/neyro-docker-ingress, mode: '0755'}
+    - {src: neyro-docker-ingress.service.j2, dest: /etc/systemd/system/neyro-docker-ingress.service, mode: '0644'}
+  notify: Apply Docker ingress protection
