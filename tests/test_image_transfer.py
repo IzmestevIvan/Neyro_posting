@@ -2,6 +2,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 import tarfile
 import tempfile
@@ -93,6 +95,32 @@ class ImageTransfer(unittest.TestCase):
         for value in ['latest','../../secret',BASE+';id','sha256:short']:
             with self.assertRaises(ValueError):
                 transfer.image_id(value)
+
+
+class ReserveBaseSelection(unittest.TestCase):
+    def test_prefers_verified_image_marker_then_snapshot_over_dormant_tag(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts/resilience/pull-backup.sh').read_text()
+        function = source.split('image_base() {', 1)[1].split('\nimage_id=$(cat', 1)[0]
+        function = 'image_base() {' + function
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'bin'
+            binary.mkdir()
+            (binary / 'age').write_text('#!/bin/sh\ncat "$4"\n')
+            (binary / 'docker').write_text('#!/bin/sh\nprintf "%s\\n" "sha256:' + 'c'*64 + '"\n')
+            for path in binary.iterdir():
+                path.chmod(0o755)
+            archive(root / 'latest.age', [('./image-id', BASE.encode(), tarfile.REGTYPE)], mode='w:gz')
+            command = function + '\nimage_base app-image-id image-id'
+            env = {**os.environ, 'PATH': str(binary) + ':' + os.environ['PATH'], 'root': str(root), 'config': str(root)}
+            def read():
+                return subprocess.check_output(['bash','-euo','pipefail','-c',command], env=env, text=True).strip()
+            self.assertEqual(read(), BASE)
+            (root / 'app-image-id').write_text(TARGET)
+            self.assertEqual(read(), TARGET)
+            (root / 'app-image-id').write_text('../bad')
+            with self.assertRaises(subprocess.CalledProcessError):
+                read()
 
 
 if __name__ == '__main__':

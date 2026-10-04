@@ -24,10 +24,25 @@ primary=$(cat "$config/primary")
 ssh "${ssh_args[@]}" "$primary" snapshot > "$stage/snapshot.tar.gz.age"
 age -d -i "$config/backup.agekey" "$stage/snapshot.tar.gz.age" | tar xzf - -C "$stage" ./database.dump ./image-id ./proxy-image-id ./snapshot-time ./SHA256SUMS
 (cd "$stage" && sha256sum --check SHA256SUMS >/dev/null)
+# Prefer the last verified snapshot identity over the dormant deployment tag.
+# The standby tag deliberately stays unchanged until an explicit restore.
+image_base() {
+  local kind=$1 base
+  if test -s "$root/$kind"; then
+    base=$(cat "$root/$kind")
+  elif test -e "$root/latest.age"; then
+    base=$(age -d -i "$config/backup.agekey" "$root/latest.age" | tar xzOf - "./$2")
+  else
+    base=$(docker image inspect neyro-posting:latest --format '{{.Id}}')
+  fi
+  [[ "$base" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  docker image inspect "$base" >/dev/null
+  printf '%s\n' "$base"
+}
 image_id=$(cat "$stage/image-id")
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$image_id" >/dev/null 2>&1; then
-  if test -s "$root/app-image-id"; then base_id=$(cat "$root/app-image-id"); else base_id=$(docker image inspect neyro-posting:latest --format '{{.Id}}'); fi
+  base_id=$(image_base app-image-id image-id)
   [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
   ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $image_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$image_id"
   docker image inspect "$image_id" >/dev/null
@@ -35,7 +50,7 @@ fi
 proxy_id=$(cat "$stage/proxy-image-id")
 [[ "$proxy_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$proxy_id" >/dev/null 2>&1; then
-  if test -s "$root/proxy-image-id"; then base_id=$(cat "$root/proxy-image-id"); else base_id=$(docker image inspect neyro-caddy:recovery --format '{{.Id}}'); fi
+  base_id=$(image_base proxy-image-id proxy-image-id)
   [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
   ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $proxy_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$proxy_id"
   docker image inspect "$proxy_id" >/dev/null
