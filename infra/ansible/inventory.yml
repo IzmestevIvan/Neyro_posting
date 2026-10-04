@@ -1,0 +1,13 @@
+all:
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: ~/.ssh/neyro_deploy
+  children:
+    primary:
+      hosts:
+        neyro_primary:
+          ansible_host: 31.76.244.26
+    reserve:
+      hosts:
+        neyro_reserve:
+          ansible_host: 144.31.53.148

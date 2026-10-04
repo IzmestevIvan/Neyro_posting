@@ -1,0 +1,12 @@
+{
+  "name": "neyro-posting-ui-tests",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node tests/test_ui_state.cjs && node tests/test_billing_refresh_ui.cjs && node tests/test_preferences.cjs && node tests/test_account_ui.cjs",
+    "test:browser": "node scripts/ci/browser-tests.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

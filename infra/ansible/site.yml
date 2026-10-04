@@ -1,0 +1,147 @@
+---
+- name: Maintain the existing Ubuntu servers without changing application data
+  hosts: all
+  become: true
+  serial: 1
+  gather_facts: true
+  tasks:
+    - name: Require the supported operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+        fail_msg: This baseline is designed for the existing Ubuntu 24.04 servers.
+    - name: Install baseline administration tools without upgrading all packages
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, git, rsync, age, fail2ban, unattended-upgrades]
+        state: present
+        update_cache: true
+        cache_valid_time: 86400
+    - name: Keep automatic security updates and intrusion blocking active
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop: [fail2ban, unattended-upgrades]
+    - name: Preserve key-only administrative access
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-neyro-managed.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Managed by infra/ansible/site.yml; existing authorized keys are preserved.
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin prohibit-password
+          MaxAuthTries 3
+          LoginGraceTime 30
+      notify: [Validate SSH, Reload SSH]
+    - name: Never reboot automatically during a security update
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/52neyro-reboot-policy
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          Unattended-Upgrade::Automatic-Reboot "false";
+    - name: Create bounded journal configuration directory
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        mode: '0755'
+    - name: Bound system journal storage
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/neyro.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Journal]
+          SystemMaxUse=128M
+          RuntimeMaxUse=32M
+          MaxRetentionSec=14day
+      notify: Restart journald
+    - name: Inspect environment permissions without reading secrets
+      ansible.builtin.stat:
+        path: '/opt/neyro/{{ item }}'
+      loop: [.env, .app.env, .support.env]
+      register: environment_files
+    - name: Restrict environment files to root
+      ansible.builtin.file:
+        path: '{{ item.stat.path }}'
+        owner: root
+        group: root
+        mode: '0600'
+      loop: '{{ environment_files.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+      when: item.stat.exists
+    - name: Check current service health
+      ansible.builtin.command: systemctl is-active docker ssh fail2ban
+      changed_when: false
+      check_mode: false
+    - name: Check reserve timers without starting application workers
+      ansible.builtin.command: systemctl is-active neyro-backup.timer neyro-monitor.timer
+      changed_when: false
+      check_mode: false
+      when: "'reserve' in group_names"
+  handlers:
+    - name: Validate SSH
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+    - name: Reload SSH
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+    - name: Restart journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald
+        state: restarted
+
+- name: Install the restricted deployment entry point on the primary only
+  hosts: primary
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create private deployment directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/neyro-deploy, /var/lib/neyro-deploy, /var/lib/neyro-deploy/uploads, /var/lib/neyro-deploy/status, /var/log/neyro-deploy]
+    - name: Install versioned deployment tools
+      ansible.builtin.copy:
+        src: '../../scripts/deploy/{{ item }}'
+        dest: '/usr/local/sbin/{{ item }}'
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [neyro-release.py, neyro-deploy-dispatch.py]
+    - name: Keep encrypted backup export compatible with locked requirements
+      ansible.builtin.copy:
+        src: ../../scripts/resilience/export-backup.sh
+        dest: /usr/local/sbin/neyro-export-backup
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Configure the permitted health endpoint
+      ansible.builtin.copy:
+        dest: /etc/neyro-deploy/config.json
+        owner: root
+        group: root
+        mode: '0600'
+        content: '{"health_url":"https://flipbazar.ru/healthz"}'
+    - name: Install a dedicated forced-command CI key when supplied
+      ansible.builtin.blockinfile:
+        path: /root/.ssh/authorized_keys
+        owner: root
+        group: root
+        mode: '0600'
+        marker: '# {mark} NEYRO CI DEPLOY'
+        block: 'restrict,command="/usr/local/sbin/neyro-deploy-dispatch.py" {{ lookup("ansible.builtin.file", ci_public_key_file) }}'
+        create: false
+      when: ci_public_key_file is defined

@@ -15,3 +15,17 @@ README.md
 Dockerfile
 docker-compose.yml
 Caddyfile
+
+# Development and infrastructure inputs do not belong in the build context.
+.github/
+.githooks/
+.kube/
+infra/
+tests/
+docs/
+node_modules/
+artifacts/
+**/*.key
+**/*.pem
+**/*.tfvars
+**/*.tfstate*
