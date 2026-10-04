@@ -2,6 +2,7 @@
 
 | Документ | О чём |
 |---|---|
+| [infrastructure.md](infrastructure.md) | GitHub CI/CD, Ansible, подготовка Kubernetes, проверки и фактический статус подключения |
 | [HANDOFF.md](HANDOFF.md) | начать новый чат: фактическое состояние, проверки, открытые задачи и безопасный порядок продолжения |
 | [yookassa-connectivity.md](yookassa-connectivity.md) | воспроизводимые сетевые сбои ЮKassa и условия безопасного включения оплаты |
 | [billing.md](billing.md) | ЮKassa, веб-кабинет, тарифы, смена плана и ручные чеки НПД |

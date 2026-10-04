@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -6,8 +6,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY app ./app
 COPY scripts ./scripts

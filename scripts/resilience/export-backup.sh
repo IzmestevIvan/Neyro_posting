@@ -26,6 +26,7 @@ docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 docker compose exec -T db pg_restore --list < "$stage/database.dump" > /dev/null
 # Snapshot only the deployed release; never copy Docker socket or backup archives.
 cp -a app scripts requirements.txt Dockerfile docker-compose.yml Caddyfile .dockerignore .env "$stage/release/"
+if test -f requirements.lock; then cp requirements.lock "$stage/release/"; fi
 if test -f .app.env; then cp .app.env "$stage/release/"; fi
 if test -f .support.env; then cp .support.env "$stage/release/"; fi
 if test -f Dockerfile.caddy; then cp Dockerfile.caddy "$stage/release/"; fi

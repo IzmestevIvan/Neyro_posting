@@ -21,7 +21,19 @@ node_modules/
 # Protected environment variants and interrupted renderer temporary files.
 .env.*
 !.env.billing.example
+!.env.example
 .app.env.*
 .billing.env.*
 .support.env.*
 .deploy.env.*
+
+# Infrastructure and CI outputs (never commit secrets/state)
+artifacts/
+infra/ansible/*.local.yml
+infra/ansible/vault*
+.kube/
+*.retry
+*.tfstate*
+*.tfvars
+*.key
+*.pem

@@ -12,7 +12,7 @@
 ## Запуск
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.lock
 createdb neyro                      # нужен PostgreSQL 16+
 cp .env.example .env                # BOT_TOKEN, ADMIN_IDS, GEMINI_API_KEY, DATABASE_URL
 .venv/bin/python -m app.main
@@ -53,15 +53,15 @@ ngrok http 8080
 Описание защиты и резерва: [security-defense.md](docs/security-defense.md),
 [disaster-recovery.md](docs/disaster-recovery.md).
 
-Обновить прод после правок в коде:
+GitHub CI/CD и Ansible подготовлены в `codex/infrastructure-baseline`; их подключение
+ещё не завершено. Точный статус, запуск проверок и порядок настройки:
+[инфраструктура](docs/infrastructure.md). Kubernetes подготовлен для будущего переноса
+и не устанавливается на текущие VPS.
 
-```bash
-./deploy.sh
-```
-
-Скрипт заливает код, пересобирает образ и перезапускает стек. Перед запуском проверьте
-состав изменений: он разворачивает рабочую копию. Серверный `.env` не перезаписывается;
-из него формируется закрытый `.app.env` с ограниченным набором переменных для приложения.
+После подключения выпуска используйте GitHub → Actions → **Deploy production**
+с полным SHA проверенного main-коммита, либо `./deploy.sh <sha>` через GitHub CLI.
+Скрипт больше не загружает незакоммиченную рабочую папку. Деплой сохраняет закрытые
+настройки сервера, делает снимок и откатывает приложение при ошибке запуска.
 Секреты платежей, ботов и базы не должны попадать в Git или браузерные ассеты.
 
 Полезное на сервере:

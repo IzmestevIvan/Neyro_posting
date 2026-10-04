@@ -1,0 +1,51 @@
+name: Deploy production
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full SHA of the current main commit with a successful CI run
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: production
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Require current main and successful CI for this exact SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/ci/require_release_ci.py
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - name: Build release bundle from the committed tree
+        run: python3 scripts/deploy/bundle.py "$RELEASE_SHA" /tmp/release.tar.gz
+      - name: Upload and release using the restricted key
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          export DEPLOY_KEY_FILE="$RUNNER_TEMP/neyro-deploy-key"
+          export DEPLOY_KNOWN_HOSTS_FILE="$RUNNER_TEMP/neyro-known-hosts"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$DEPLOY_KEY_FILE"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$DEPLOY_KNOWN_HOSTS_FILE"
+          bash scripts/deploy/client.sh "$RELEASE_SHA" /tmp/release.tar.gz
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/neyro-deploy-key" "$RUNNER_TEMP/neyro-known-hosts"
