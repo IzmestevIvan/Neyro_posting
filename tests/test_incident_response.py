@@ -1,6 +1,8 @@
 """Exercise recovery/fencing boundaries without touching live services or sending alerts."""
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -124,6 +126,25 @@ class ControlledOperations(unittest.TestCase):
                     with patch.object(control, 'run', side_effect=outputs):
                         with self.assertRaises(RuntimeError):
                             control.apply('restart_app')
+
+
+class StandbyRestoreGuard(unittest.TestCase):
+    def test_running_restarting_paused_and_unknown_containers_block_restore(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts/resilience/refresh-standby.sh').read_text()
+        # Exercise the actual shell guard up to the first archive read, without a DB.
+        guard = source.split('archive=$(readlink', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            (bin_dir / 'flock').write_text('#!/bin/sh\nexit 0\n')
+            (bin_dir / 'docker').write_text('#!/bin/sh\nif [ "$1" = compose ]; then echo container-id; else echo "$CONTAINER_STATE"; fi\n')
+            for file in bin_dir.iterdir():
+                file.chmod(0o755)
+            script = guard.replace('/etc/neyro-reserve', str(root)).replace('/var/lib/neyro-reserve', str(root)).replace('/run/lock/neyro-reserve.lock', str(root / 'lock')).replace('/opt/neyro', str(root))
+            for status in ('running', 'restarting', 'paused', 'unknown', 'exited', 'created'):
+                result = subprocess.run(['bash', '-c', script], env={**os.environ, 'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'CONTAINER_STATE': status}, capture_output=True)
+                self.assertEqual(result.returncode == 0, status in ('exited', 'created'), status)
 
 
 if __name__ == '__main__':

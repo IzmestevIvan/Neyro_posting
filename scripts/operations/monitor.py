@@ -91,7 +91,7 @@ def observe(role):
         checks['known_containers'] = False
     try:
         run(['systemctl', 'is-active', 'docker', 'ssh', 'fail2ban', 'auditd', 'neyro-docker-ingress'])
-        run(['iptables', '-C', 'NEYRO-INGRESS', '-j', 'DROP'])
+        run(['/usr/local/sbin/neyro-docker-ingress', '--check'])
         ssh = run(['/usr/sbin/sshd', '-T'])
         checks['security'] = (run(['ufw', 'status']).startswith('Status: active')
                               and 'passwordauthentication no' in ssh

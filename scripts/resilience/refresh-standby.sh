@@ -9,7 +9,15 @@ exec 9>/run/lock/neyro-reserve.lock
 flock -w 30 9
 cd /opt/neyro
 for service in app support caddy; do
-  test -z "$(docker compose ps -q --status running "$service")" || { echo "$service is running; refusing restore" >&2; exit 1; }
+  # A restarting/paused worker is not a dormant worker: it may resume publication.
+  containers=$(docker compose ps --all -q "$service")
+  for container in $containers; do
+    state=$(docker inspect --format '{{.State.Status}}' "$container")
+    case "$state" in
+      exited|created|dead) ;;
+      *) echo "$service is not dormant; refusing restore" >&2; exit 1 ;;
+    esac
+  done
 done
 archive=$(readlink -f "$root/latest.age")
 stage=$(mktemp -d "$root/.refresh.XXXXXXXX")

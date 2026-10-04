@@ -47,7 +47,8 @@ Docker-трафик может обходить UFW INPUT. Поэтому отд
 собственную цепочку `NEYRO-INGRESS` в `DOCKER-USER`, ограничивая только входящий
 forwarded traffic с внешнего интерфейса. Внутренний обмен контейнеров и ответы на
 исходящие запросы сохраняются. Правила загружаются атомарно через iptables-restore
-и повторяются при перезапуске Docker; IPv6 обрабатывается, если его Docker-chain существует.
+и повторяются при перезапуске Docker. Монитор проверяет состав правил и подключение
+цепочки; повторный Ansible исправляет обнаруженное расхождение; IPv6 обрабатывается, если его Docker-chain существует.
 [Ansible UFW](https://docs.ansible.com/projects/ansible/latest/collections/community/general/ufw_module.html),
 [Ansible sysctl](https://docs.ansible.com/projects/ansible/latest/collections/ansible/posix/sysctl_module.html).
 

@@ -1,9 +1,25 @@
 #!/usr/bin/env bash
 # Docker published ports bypass UFW INPUT. Restrict only external forwarded ingress.
 set -euo pipefail
+[[ $# == 0 || ( $# == 1 && "$1" == --check ) ]] || exit 64
+expected=$(cat <<'EXPECTED'
+-N NEYRO-INGRESS
+-A NEYRO-INGRESS -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+{% if 'primary' in group_names %}
+-A NEYRO-INGRESS -p tcp -m conntrack --ctstate DNAT --ctorigdstport 80 -j RETURN
+-A NEYRO-INGRESS -p tcp -m conntrack --ctstate DNAT --ctorigdstport 443 -j RETURN
+{% endif %}
+-A NEYRO-INGRESS -j DROP
+EXPECTED
+)
 for family in iptables ip6tables; do
   if ! "$family" -w 5 -S DOCKER-USER >/dev/null 2>&1; then
     if [[ "$family" == iptables ]]; then echo 'Docker IPv4 firewall chain missing' >&2; exit 1; fi
+    continue
+  fi
+  if [[ ${1:-} == --check ]]; then
+    [[ "$("$family" -w 5 -S NEYRO-INGRESS)" == "$expected" ]]
+    "$family" -w 5 -C DOCKER-USER -i {{ ansible_facts['default_ipv4']['interface'] | quote }} -j NEYRO-INGRESS
     continue
   fi
   "$family-restore" --wait 5 --noflush <<'RULES'

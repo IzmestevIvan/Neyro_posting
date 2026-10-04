@@ -122,3 +122,15 @@
     - {src: neyro-docker-ingress.j2, dest: /usr/local/sbin/neyro-docker-ingress, mode: '0755'}
     - {src: neyro-docker-ingress.service.j2, dest: /etc/systemd/system/neyro-docker-ingress.service, mode: '0644'}
   notify: Apply Docker ingress protection
+- name: Inspect availability of the ingress policy checker
+  ansible.builtin.stat:
+    path: /usr/local/sbin/neyro-docker-ingress
+  register: ingress_checker
+- name: Detect and repair Docker ingress policy drift
+  ansible.builtin.command: /usr/local/sbin/neyro-docker-ingress --check
+  register: ingress_policy
+  failed_when: false
+  changed_when: ingress_policy.rc != 0
+  check_mode: false
+  when: ingress_checker.stat.exists and not ansible_check_mode
+  notify: Apply Docker ingress protection
