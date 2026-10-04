@@ -13,6 +13,8 @@ import time
 CONFIG = Path('/etc/neyro-ops')
 STATE = Path('/var/lib/neyro-ops')
 DEPLOY_LOCK = Path('/run/lock/neyro-deploy.lock')
+# Pending maintenance is actionable, but unchanged hourly reminders hide outages.
+REMINDER_INTERVALS = {'reboot_clear': 24 * 3600}
 LABELS = {
     'disk': 'свободное место на диске', 'memory': 'доступная память',
     'database': 'здоровье базы данных', 'application': 'здоровье приложения',
@@ -20,7 +22,7 @@ LABELS = {
     'security': 'работа SSH, firewall, Fail2ban и аудита',
     'workers_stopped': 'отсутствие работающих ботов на резерве',
     'backup_timer': 'таймеры резервирования и внешнего мониторинга',
-    'reboot_clear': 'перезагрузка после обновлений безопасности',
+    'reboot_clear': 'плановая перезагрузка после обновлений безопасности',
     'known_containers': 'отсутствие посторонних работающих контейнеров',
     'maintenance_clear': 'завершение обслуживания сервера',
 }
@@ -178,7 +180,8 @@ def main():
                 print('NeuroPost recovery: ' + result['recovery_action'], flush=True)
             save(STATE / 'status.json', result)
             from neyro_alerts import notify
-            notify(checks, STATE, CONFIG / 'alerts.json', labels={k: LABELS[k] for k in checks}, source=config['role'])
+            notify(checks, STATE, CONFIG / 'alerts.json', labels={k: LABELS[k] for k in checks},
+                   source=config['role'], reminder_intervals=REMINDER_INTERVALS)
     print(json.dumps(result, ensure_ascii=False))
 
 

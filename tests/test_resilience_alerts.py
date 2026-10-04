@@ -156,3 +156,48 @@ def test_duplicate_recipient_is_contacted_once(tmp_path, alert_config, monkeypat
     for _ in range(3):
         alerts.notify({'primary_healthy': False, 'backup_fresh': True}, tmp_path, alert_config)
     assert calls == [101]
+
+
+def test_daily_maintenance_reminders_do_not_delay_outages_or_recovery(tmp_path, alert_config, monkeypatch):
+    now = [1000]
+    calls = []
+    monkeypatch.setattr(alerts.time, 'time', lambda: now[0])
+    monkeypatch.setattr(alerts, 'send', lambda message, config: calls.append(message) or True)
+    options = dict(labels={'reboot_clear': 'reboot', 'disk': 'disk'}, source='primary',
+                   reminder_intervals={'reboot_clear': 86400})
+    checks = {'reboot_clear': False, 'disk': False}
+    for _ in range(3):
+        alerts.notify(checks, tmp_path, alert_config, **options)
+    assert len(calls) == 4  # Both initial alarms reach both administrators.
+    calls.clear()
+    now[0] += 3600
+    alerts.notify(checks, tmp_path, alert_config, **options)
+    assert len(calls) == 2 and all('disk' in message for message in calls)
+    calls.clear()
+    now[0] = 1000 + 86400
+    alerts.notify(checks, tmp_path, alert_config, **options)
+    assert len(calls) == 4
+    calls.clear()
+    now[0] += 1
+    checks['reboot_clear'] = True
+    alerts.notify(checks, tmp_path, alert_config, **options)
+    assert len(calls) == 2 and all('снова в норме — reboot' in message for message in calls)
+    calls.clear()
+    checks['reboot_clear'] = False
+    for _ in range(3):
+        alerts.notify(checks, tmp_path, alert_config, **options)
+    assert len(calls) == 2 and all('требует внимания — reboot' in message for message in calls)
+
+
+def test_longer_reminder_interval_preserves_existing_acknowledgements(tmp_path, alert_config, monkeypatch):
+    state = {'version': 2, 'recipients': {
+        str(admin): {'reboot_clear': {'active': True, 'failures': 3, 'sent_at': 1000}}
+        for admin in (101, 202)}}
+    (tmp_path / 'alert-state.json').write_text(json.dumps(state))
+    monkeypatch.setattr(alerts.time, 'time', lambda: 4600)
+    monkeypatch.setattr(alerts, 'send', lambda *args: pytest.fail('maintenance reminder is not due'))
+    alerts.notify({'reboot_clear': False}, tmp_path, alert_config,
+                  labels={'reboot_clear': 'reboot'}, source='reserve',
+                  reminder_intervals={'reboot_clear': 86400})
+    saved = json.loads((tmp_path / 'alert-state.json').read_text())
+    assert all(checks['reboot_clear']['sent_at'] == 1000 for checks in saved['recipients'].values())
