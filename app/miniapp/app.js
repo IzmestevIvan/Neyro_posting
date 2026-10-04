@@ -28,6 +28,7 @@ let adsView = 'active';
 let publishingNow = false;
 let subscription = null;
 let billingLoading = false;
+let billingCheckedAt = 0;
 let billingReturnPage = 'home';
 let exploring = false;
 const exploreDisabled = new Map();
@@ -590,9 +591,7 @@ function renderPlan() {
 async function loadBilling() {
   if (billingLoading || !boot) return;
   billingLoading = true;
-  $('#billingRefresh').disabled = true;
-  $('#billingRefresh').textContent = tr('Проверяем тариф…','Checking your plan…');
-  $('#billingAvailability').hidden = true;
+  billingCheckedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   renderPlan();
@@ -603,6 +602,8 @@ async function loadBilling() {
     const data = await api('/billing/subscription',options);
     if (!data || !['active','inactive'].includes(data.status)) throw new Error(tr('Не удалось получить состояние доступа','Could not retrieve access status'));
     subscription = data;
+    const wasGated = !$('#gate').hidden;
+    const wasOnboarding = !$('#onboarding').hidden;
     // Refresh access without replacing selected channel settings or unsaved drafts.
     boot.user = {...refreshed.user,has_access:data.status === 'active'};
     if (!channel && refreshed.channels.length) {
@@ -613,22 +614,39 @@ async function loadBilling() {
     }
     $('#nav').hidden = (!channel && !exploring) || !boot.user.has_access;
     $('#channelBar').hidden = (!channel && !exploring) || !boot.user.has_access;
-    if (!channel && !boot.user.has_access && page !== 'billing') showGate();
+    if (!boot.user.has_access && page !== 'billing') {
+      // Keep channel drafts in memory while the access screen is shown.
+      $('#status').textContent = tr('доступ не активирован','access not active');
+      showOnly('gate');
+    } else if (boot.user.has_access && (wasGated || (wasOnboarding && channel))) {
+      if (channel) enterNormalMode();
+      else exploreWasChosen() ? enterExploreMode() : showOnboarding();
+    }
     renderPlan();
-    $('#billingAvailability').textContent = tr('Данные тарифа обновлены.','Your plan is up to date.');
-    $('#billingAvailability').hidden = false;
+    $('#billingAvailability').hidden = true;
   } catch (error) {
     const message = error.name === 'AbortError' ? tr('Сервер не ответил вовремя','The server did not respond in time') : error.message;
-    $('#billingAvailability').textContent = `${message}. ${tr('Попробуйте обновить ещё раз.','Please try refreshing again.')}`;
+    $('#billingAvailability').textContent = `${message}. ${tr('Повторим проверку автоматически. Показаны последние полученные данные.','We’ll retry automatically. Showing the last received details.')}`;
     $('#billingAvailability').hidden = false;
   } finally {
     clearTimeout(timeout);
     billingLoading = false;
-    $('#billingRefresh').disabled = false;
-    $('#billingRefresh').innerHTML = `${tr('Обновить тариф','Refresh plan')} ${icon('refresh')}`;
   }
 }
-$('#billingRefresh').addEventListener('click', loadBilling);
+function refreshBillingAutomatically(force = false) {
+  if (!boot || document.hidden || billingLoading || (!force && Date.now() - billingCheckedAt < 60000)) return;
+  return loadBilling();
+}
+document.addEventListener?.('visibilitychange', () => { if (!document.hidden) refreshBillingAutomatically(true); });
+window.addEventListener?.('focus', () => refreshBillingAutomatically(true));
+tg?.onEvent?.('activated', () => refreshBillingAutomatically(true));
+$('#billingChangePlan').addEventListener('click', event => {
+  // The separate web account handles plan selection and its own authentication.
+  if (tg?.initData && tg.openLink) {
+    try { tg.openLink(new URL('/account#plans',location.origin).href); event.preventDefault(); }
+    catch { /* Keep the native link available when the client cannot open it. */ }
+  }
+});
 $('#billingBack').addEventListener('click', () => {
   if (!boot?.user.has_access) return showGate();
   if (!channel) return exploring ? enterExploreMode(billingReturnPage) : showOnboarding();
@@ -1214,7 +1232,7 @@ function renderExploreWorkspace() {
   $('#channelSelect').innerHTML = `<option>${tr('Канал пока не подключён','No channel connected yet')}</option>`;
   $('#channelSelect').disabled = true;
   $('#exploreHome').innerHTML = `
-    <div class="explore-intro"><div><span class="eyebrow">${tr('НЕЙРОПОСТИНГ','NEUROPOST')}</span><h2>${tr('Добро пожаловать<br>в редакцию','Welcome to<br>your workspace')}</h2><p>${tr('Источники, черновики и публикации — в одном месте. Осмотритесь и подключите канал, когда будете готовы.','Sources, drafts and posts in one place. Explore your workspace and connect a channel when you’re ready.')}</p><div class="explore-actions"><button class="accent" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button><button class="text-link" data-explore-tutorial>${tr('Как всё работает','How it works')} ${icon('back')}</button></div></div></div>
+    <div class="explore-intro"><div><span class="eyebrow">${tr('НЕЙРОПОСТИНГ','NEUROPOST')}</span><h2>${tr('Добро пожаловать<br>в редакцию','Welcome to<br>your workspace')}</h2><p>${tr('Источники, черновики и публикации — в одном месте. Осмотритесь и подключите канал, когда будете готовы.','Sources, drafts and posts in one place. Explore your workspace and connect a channel when you’re ready.')}</p><div class="explore-actions"><button class="accent" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button><button class="text-link" data-explore-tutorial>${tr('Изучить приложение','Explore the guide')} ${icon('back')}</button></div></div></div>
     <div class="explore-section-head"><h3>${tr('От источника до публикации','From source to publication')}</h3><span>01 — 03</span></div>
     <div class="workflow-list">${[
       ['sources','01',tr('Соберите свои источники','Bring your sources'),tr('Telegram-каналы и RSS. Вы решаете, откуда брать материалы.','Telegram channels and RSS. You decide where content comes from.'),'sources'],
@@ -1273,16 +1291,107 @@ document.addEventListener?.('keydown', event => {
   }
 });
 
+/* A short first-visit introduction; the full guide is always opened explicitly. */
+let welcomeStep = 0;
+let welcomePlaying = false;
+let welcomeFinished = false;
+let welcomeTimer = null;
+let welcomeReturnFocus = null;
+const welcomeMotionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const welcomeStorageKey = () => `neyro:welcome:v1:${boot?.user?.tg_id ?? 'guest'}`;
+function welcomeSeen() {
+  try { return localStorage.getItem(welcomeStorageKey()) === '1'; } catch { return false; }
+}
+function renderWelcomeMotion() {
+  $('#welcome').dataset.step = String(welcomeStep);
+  $('#welcome').dataset.playing = String(welcomePlaying);
+  $('#welcomeMotion').hidden = !!welcomeMotionPreference?.matches;
+  $('#welcomeMotion').textContent = welcomePlaying ? tr('Пауза анимации','Pause animation')
+    : welcomeFinished ? tr('Посмотреть ещё раз','Replay animation') : tr('Продолжить анимацию','Resume animation');
+}
+function pauseWelcomeAnimation() {
+  clearTimeout(welcomeTimer);
+  welcomeTimer = null;
+  welcomePlaying = false;
+  renderWelcomeMotion();
+}
+function advanceWelcomeAnimation() {
+  if (!welcomePlaying || $('#welcome').hidden) return;
+  if (welcomeStep < 3) {
+    welcomeStep++;
+    renderWelcomeMotion();
+    welcomeTimer = setTimeout(advanceWelcomeAnimation, 1600);
+  } else {
+    welcomeFinished = true;
+    pauseWelcomeAnimation();
+  }
+}
+function playWelcomeAnimation() {
+  clearTimeout(welcomeTimer);
+  welcomeTimer = null;
+  if (welcomeMotionPreference?.matches) {
+    welcomeStep = 3; welcomeFinished = true; welcomePlaying = false;
+  } else {
+    if (welcomeFinished) { welcomeStep = 0; welcomeFinished = false; }
+    welcomePlaying = true;
+    welcomeTimer = setTimeout(advanceWelcomeAnimation, 1600);
+  }
+  renderWelcomeMotion();
+}
+function closeWelcome() {
+  pauseWelcomeAnimation();
+  try { localStorage.setItem(welcomeStorageKey(),'1'); } catch { /* Private mode may block storage. */ }
+  $('#welcome').hidden = true;
+  $('#app').inert = false;
+  document.body.classList.remove('welcome-open');
+  document.removeEventListener('keydown', welcomeKeyboard);
+  if (welcomeReturnFocus?.isConnected && welcomeReturnFocus !== document.body && welcomeReturnFocus.checkVisibility?.()) welcomeReturnFocus.focus();
+  else $('#openTutorial').focus();
+}
+function welcomeKeyboard(event) {
+  if ($('#welcome').hidden) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeWelcome(); }
+  if (event.key !== 'Tab') return;
+  const buttons = [...$('#welcome').querySelectorAll('button')].filter(el=>!el.hidden && !el.disabled);
+  const first = buttons[0], last = buttons[buttons.length-1];
+  if (!$('#welcome').contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+  else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+function openWelcome() {
+  if (!boot || !$('#welcome').hidden || !$('#tour').hidden) return;
+  welcomeReturnFocus = document.activeElement;
+  $('#appearancePreferences').open = false;
+  $('#welcome').hidden = false;
+  $('#app').inert = true;
+  document.body.classList.add('welcome-open');
+  $('.welcome-body').scrollTop = 0;
+  welcomeStep = 0; welcomeFinished = false;
+  playWelcomeAnimation();
+  document.addEventListener('keydown', welcomeKeyboard);
+  $('#welcomeStart').focus();
+}
+$('#welcomeStart').addEventListener('click', closeWelcome);
+$('#welcomeClose').addEventListener('click', closeWelcome);
+$('#welcomeLearn').addEventListener('click', ()=>{closeWelcome();setupTour();});
+$('#welcomeMotion').addEventListener('click', ()=>welcomePlaying ? pauseWelcomeAnimation() : playWelcomeAnimation());
+document.addEventListener?.('visibilitychange', ()=>{if(document.hidden && !$('#welcome').hidden) pauseWelcomeAnimation();});
+document.addEventListener?.('neyro:preferences', ()=>{if(!$('#welcome').hidden) renderWelcomeMotion();});
+welcomeMotionPreference?.addEventListener?.('change', ()=>{
+  if ($('#welcome').hidden) return;
+  if (welcomeMotionPreference.matches) { welcomeStep=3; welcomeFinished=true; }
+  pauseWelcomeAnimation();
+});
+
 /* ---------- guided tutorial ---------- */
 
-const TOUR_KEY = 'neyro:tour_seen';
 const TUTORIAL_PROGRESS_KEY = 'neyro:tutorial_v2';
 const TUTORIAL_COPY = {
   ru: {
     brand: 'Учебник Нейропостинга', close: 'Закрыть', next: 'Дальше', done: 'Готово',
     previous: 'Предыдущая тема', section: 'Тема', topics: 'Перейти к теме', restart: 'Начать сначала',
     saved: 'Место сохранится — продолжите обучение с этой темы.',
-    complete: 'Обучение пройдено. К любой теме можно вернуться через «Как работает Нейропостинг».',
+    complete: 'Обучение пройдено. К любой теме можно вернуться через «Изучить приложение».',
     connectFirst: 'Сначала подключите канал. Затем вернитесь к этому шагу через кнопку обучения.',
     activateFirst: 'Сначала проверьте доступ в разделе «Мой тариф». Обучение доступно в любой момент.',
     botUnavailable: 'Адрес бота пока не загружен. Откройте чат, из которого запустили приложение.',
@@ -1314,7 +1423,7 @@ const TUTORIAL_COPY = {
       {id:'limits', icon:'bolt', short:'Доступ', title:'Один дневной лимит на аккаунт',
         intro:'Раздел «Мой тариф» показывает подключённый доступ, остаток и дату окончания.',
         items:['Лимит публикаций общий для всех ваших каналов. Например, при лимите 5 и трёх публикациях в одном канале на остальные остаётся 2.', 'Новый день для лимита начинается в 00:00 UTC — это 03:00 по Москве. Часовой пояс расписания этот момент не меняет.', 'Продление ручное, без автосписаний. Повышение тарифа действует после доплаты за остаток периода; понижение — со следующего периода.'],
-        note:'Mini App показывает уже приобретённый доступ. Если он изменился, нажмите «Обновить тариф». Отправляемый пост или отправка с неясным результатом могут временно занимать место в лимите.', action:'billing', label:'Посмотреть мой доступ'},
+        note:'Доступ и лимиты обновляются автоматически. «Сменить тариф» открывает выбор в личном кабинете. Отправляемый пост или отправка с неясным результатом могут временно занимать место в лимите.', action:'billing', label:'Посмотреть мой доступ'},
       {id:'recovery', icon:'shield', short:'Помощь', title:'Если пост не появился',
         intro:'Проверяйте причину по порядку — повторная отправка не всегда нужна.',
         items:['На главной проверьте доступ, дневной остаток, паузу, источники и окно публикации. В «Постах» может ждать черновик.', 'Откройте «Историю»: там видны отсев, ошибка или ожидание. При статусе «Нужна сверка с каналом» или частичной отправке сначала проверьте сам Telegram-канал.', 'Подтверждайте результат сверки только после проверки текста и медиа. Если причина неясна, обратитесь в поддержку из настроек и укажите канал, время и текст ошибки.'],
@@ -1325,7 +1434,7 @@ const TUTORIAL_COPY = {
     brand:'NeuroPost guide', close:'Close', next:'Next', done:'Done', previous:'Previous topic',
     section:'Topic', topics:'Jump to a topic', restart:'Start again',
     saved:'Your place is saved. Reopen the guide to continue here.',
-    complete:'Guide complete. Revisit any topic from “How NeuroPost works”.',
+    complete:'Guide complete. Revisit any topic from “Explore the guide”.',
     connectFirst:'Connect a channel first, then return to this step using the guide button.',
     activateFirst:'Check your access in “My plan” first. You can open this guide at any time.',
     botUnavailable:'The bot address is not available yet. Open the chat where you launched this app.',
@@ -1357,7 +1466,7 @@ const TUTORIAL_COPY = {
       {id:'limits',icon:'bolt',short:'Access',title:'One daily limit for your account',
         intro:'“My plan” shows your existing access, remaining allowance and expiry date.',
         items:['All your channels share the daily publishing limit. With a limit of 5, publishing 3 posts in one channel leaves 2 for the others.', 'The limit resets at 00:00 UTC, or 03:00 in Moscow. The scheduling time zone does not change this reset.', 'Renewals are manual, with no automatic charges. An upgrade starts after the prorated payment; a downgrade starts next period.'],
-        note:'The Mini App shows access already acquired. Select “Refresh plan” after a change. Posts being sent or awaiting delivery verification may reserve a daily slot.',action:'billing',label:'View my access'},
+        note:'Access and limits update automatically. “Change plan” opens the choices in your web account. Posts being sent or awaiting delivery verification may reserve a daily slot.',action:'billing',label:'View my access'},
       {id:'recovery',icon:'shield',short:'Help',title:'If a post has not appeared',
         intro:'Check the cause in order. Sending again is not always the answer.',
         items:['On the home screen, check access, remaining allowance, pause, sources and the publishing window. A draft may be waiting in “Posts”.', 'Open “History” for filters, errors or waiting. If delivery is uncertain or partial, check the actual Telegram channel first.', 'Confirm delivery only after checking both text and media. If unclear, contact support from Settings with the channel, time and error message.'],
@@ -1368,9 +1477,6 @@ const TUTORIAL_COPY = {
 
 function tutorialCopy() {
   return TUTORIAL_COPY[window.NeyroPrefs?.language || document.documentElement?.lang] || TUTORIAL_COPY.ru;
-}
-function tourSeen() {
-  try { return localStorage.getItem(TOUR_KEY) === '1'; } catch { return false; }
 }
 function tutorialProgress() {
   try {
@@ -1389,7 +1495,6 @@ function saveTutorialProgress() {
 function closeTour(completed = false) {
   if (completed === true) tutorialComplete = true;
   saveTutorialProgress();
-  try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* Storage may be unavailable. */ }
   $('#tour').hidden = true;
   $('#app').inert = false;
   document.body.classList.remove('tour-open');
@@ -1441,6 +1546,7 @@ function openTutorialSection(action) {
   }
 }
 function setupTour() {
+  if (!$('#welcome').hidden) closeWelcome();
   const tour = $('#tour');
   if (!tour.hidden) return;
   tourReturnFocus = document.activeElement;
@@ -1562,19 +1668,18 @@ async function start() {
   $('#profileInitial').textContent = (boot.user.first_name || 'Н').slice(0, 1).toUpperCase();
   renderPlan();
   loadBilling();
-  if (!tourSeen()) setupTour();
 
   setInterval(() => {
     if (document.hidden) return;
+    refreshBillingAutomatically();
     if (adminOpen) refreshAdminMonitoring();
     else if (page === 'home' && channel) refreshStats();
   }, 15000);
 
-  if (!boot.user.has_access) return showGate();
-  if (!boot.channels.length) return exploreWasChosen() ? enterExploreMode() : showOnboarding();
-
-  channel = boot.channels[0];
-  enterNormalMode();
+  if (!boot.user.has_access) showGate();
+  else if (!boot.channels.length) exploreWasChosen() ? enterExploreMode() : showOnboarding();
+  else { channel = boot.channels[0]; enterNormalMode(); }
+  if (!welcomeSeen()) openWelcome();
 }
 
 $('#app').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });

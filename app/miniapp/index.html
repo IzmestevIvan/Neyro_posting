@@ -34,6 +34,43 @@
 
 <div id="boot" class="boot"><span class="spinner"></span></div>
 
+<div id="welcome" class="welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle" aria-describedby="welcomeIntro" data-step="0" data-playing="false" hidden>
+  <div class="welcome-shell">
+    <header class="welcome-head">
+      <span class="welcome-brand"><span class="mark" aria-hidden="true"></span><span data-i18n="Нейропостинг" data-i18n-en="NeuroPost">Нейропостинг</span></span>
+      <button id="welcomeClose" class="square" aria-label="Пропустить знакомство" data-i18n-aria-label="Пропустить знакомство" data-i18n-aria-label-en="Skip introduction"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="welcome-body">
+      <div class="welcome-art">
+        <div class="welcome-scene" aria-hidden="true">
+          <svg class="welcome-path" viewBox="0 0 340 180"><path class="path-base" d="M40 94H288"/><path class="path-progress" d="M40 94H288"/><circle cx="42" cy="26" r="2"/><circle cx="152" cy="155" r="2"/><circle cx="296" cy="27" r="2"/></svg>
+          <div class="welcome-channel">#</div>
+          <div class="welcome-material"><i></i><i></i><i></i></div>
+          <div class="welcome-engine"><span class="engine-ring"></span><svg class="ic"><use href="#i-bolt"/></svg><small>AI</small></div>
+          <div class="welcome-post"><span class="post-mini-head"><i></i><b></b></span><span class="post-mini-image"></span><span class="post-mini-line"></span><span class="post-mini-line short"></span><span class="post-mini-check"><svg class="ic"><use href="#i-check"/></svg></span></div>
+        </div>
+        <button id="welcomeMotion" class="welcome-motion"></button>
+      </div>
+      <div class="welcome-copy">
+        <span class="eyebrow" data-i18n="ОТ МАТЕРИАЛА ДО ПУБЛИКАЦИИ" data-i18n-en="FROM SOURCE TO POST">ОТ МАТЕРИАЛА ДО ПУБЛИКАЦИИ</span>
+        <h2 id="welcomeTitle" data-i18n="Ваша редакция. Четыре простых шага." data-i18n-en="Your workspace. Four simple steps.">Ваша редакция. Четыре простых шага.</h2>
+        <p id="welcomeIntro" data-i18n="Вы задаёте направление. Нейропостинг помогает с материалами и текстами." data-i18n-en="You set the direction. NeuroPost helps with sources and writing.">Вы задаёте направление. Нейропостинг помогает с материалами и текстами.</p>
+        <ol class="welcome-steps">
+          <li><span class="welcome-step-number" aria-hidden="true">01</span><div><b data-i18n="Подключите канал" data-i18n-en="Connect a channel">Подключите канал</b><small data-i18n="Добавьте бота с правом публикации." data-i18n-en="Add the bot with permission to publish.">Добавьте бота с правом публикации.</small></div></li>
+          <li><span class="welcome-step-number" aria-hidden="true">02</span><div><b data-i18n="Выберите источники" data-i18n-en="Choose your sources">Выберите источники</b><small data-i18n="Telegram-каналы или RSS-ленты." data-i18n-en="Telegram channels or RSS feeds.">Telegram-каналы или RSS-ленты.</small></div></li>
+          <li><span class="welcome-step-number" aria-hidden="true">03</span><div><b data-i18n="Задайте свой стиль" data-i18n-en="Make it your own">Задайте свой стиль</b><small data-i18n="Темы, язык и правила обработки." data-i18n-en="Topics, language and writing rules.">Темы, язык и правила обработки.</small></div></li>
+          <li><span class="welcome-step-number" aria-hidden="true">04</span><div><b data-i18n="Проверьте и опубликуйте" data-i18n-en="Review and publish">Проверьте и опубликуйте</b><small data-i18n="Начните с проверки первого черновика." data-i18n-en="Start by reviewing your first draft.">Начните с проверки первого черновика.</small></div></li>
+        </ol>
+      </div>
+    </div>
+    <footer class="welcome-foot">
+      <button id="welcomeStart" class="accent"><span data-i18n="Начать работу" data-i18n-en="Get started">Начать работу</span><svg class="ic forward" aria-hidden="true"><use href="#i-back"/></svg></button>
+      <button id="welcomeLearn" class="ghost" data-i18n="Изучить приложение" data-i18n-en="Explore the guide">Изучить приложение</button>
+      <p data-i18n="Канал можно подключить позже." data-i18n-en="You can connect a channel later.">Канал можно подключить позже.</p>
+    </footer>
+  </div>
+</div>
+
 <div id="tour" class="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
   <div class="tour-shell">
     <header class="tour-head">
@@ -59,7 +96,7 @@
         <p id="status" class="status">—</p>
       </div>
     </div>
-    <div class="header-actions"><button id="openTutorial" class="ghost square" data-tutorial aria-label="Как работает Нейропостинг" data-i18n-aria-label="Как работает Нейропостинг" data-i18n-aria-label-en="How NeuroPost works" title="Как работает Нейропостинг" data-i18n-title="Как работает Нейропостинг" data-i18n-title-en="How NeuroPost works">?</button><details class="interface-preferences" id="appearancePreferences">
+    <div class="header-actions"><button id="openTutorial" class="ghost square" data-tutorial aria-label="Изучить приложение" data-i18n-aria-label="Изучить приложение" data-i18n-aria-label-en="Explore the guide" title="Изучить приложение" data-i18n-title="Изучить приложение" data-i18n-title-en="Explore the guide">?</button><details class="interface-preferences" id="appearancePreferences">
     <summary aria-label="Тема и язык" data-i18n-aria-label="Тема и язык" data-i18n-aria-label-en="Theme and language" title="Тема и язык" data-i18n-title="Тема и язык" data-i18n-title-en="Theme and language"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></summary>
     <div class="preferences">
       <label><span data-i18n="Оформление" data-i18n-en="Appearance">Оформление</span><select data-pref-theme>
@@ -108,7 +145,7 @@
              autocapitalize="characters" autocorrect="off" spellcheck="false">
       <button id="promoSubmit" class="accent wide"><span data-i18n="Активировать" data-i18n-en="Activate">Активировать</span></button>
       <p class="muted small" id="gateHint"></p>
-      <button class="text-link" data-tutorial data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</button>
+      <button class="text-link" data-tutorial data-i18n="Изучить приложение" data-i18n-en="Explore the guide">Изучить приложение</button>
     </div>
   </section>
 
@@ -123,9 +160,9 @@
       </ol>
       <input type="text" id="firstChannelInput" placeholder="@username канала" autocapitalize="off" autocorrect="off" data-i18n-placeholder="@username канала" data-i18n-placeholder-en="Channel @username">
       <button id="firstChannelSubmit" class="accent wide"><span data-i18n="Добавить канал" data-i18n-en="Add channel">Добавить канал</span></button>
-      <button id="skipChannel" class="ghost wide" data-i18n="Пропустить — изучить приложение" data-i18n-en="Skip — explore the app">Пропустить — изучить приложение</button>
+      <button id="skipChannel" class="ghost wide" data-i18n="Пропустить — открыть редакцию" data-i18n-en="Skip — open workspace">Пропустить — открыть редакцию</button>
       <p class="hint onboarding-optional" data-i18n="Канал можно подключить позже. Ваш доступ уже активен." data-i18n-en="Connect a channel later. Your activated access is already available.">Канал можно подключить позже. Ваш доступ уже активен.</p>
-      <button class="text-link" data-tutorial data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</button>
+      <button class="text-link" data-tutorial data-i18n="Изучить приложение" data-i18n-en="Explore the guide">Изучить приложение</button>
     </div>
   </section>
 
@@ -354,7 +391,7 @@
 
     <button id="replayTour" class="tour-entry" data-tutorial>
       <span class="tour-entry-icon" aria-hidden="true"><svg class="ic"><use href="#i-bolt"/></svg></span>
-      <span class="tour-entry-copy"><b data-i18n="Как работает Нейропостинг" data-i18n-en="How NeuroPost works">Как работает Нейропостинг</b><small data-i18n="Полное обучение · 8 тем" data-i18n-en="Complete guide · 8 topics">Полное обучение · 8 тем</small></span>
+      <span class="tour-entry-copy"><b data-i18n="Изучить приложение" data-i18n-en="Explore the guide">Изучить приложение</b><small data-i18n="Полное обучение · 8 тем" data-i18n-en="Complete guide · 8 topics">Полное обучение · 8 тем</small></span>
       <svg class="ic tour-entry-arrow" aria-hidden="true"><use href="#i-back"/></svg>
     </button>
 
@@ -371,7 +408,8 @@
     <div id="planCard" class="card current-plan" aria-live="polite"></div>
     <p class="hint"><span data-i18n="Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве." data-i18n-en="Your daily AI post limit is shared across all channels and resets at 00:00 UTC (03:00 Moscow time).">Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве.</span></p>
     <p id="billingAvailability" class="notice" role="status" hidden></p>
-    <button id="billingRefresh" class="ghost wide"><span data-i18n="Обновить доступ" data-i18n-en="Refresh plan">Обновить доступ</span> <svg class="ic"><use href="#i-refresh"/></svg></button>
+    <a id="billingChangePlan" class="billing-change-plan" href="/account#plans" target="_blank" rel="noopener noreferrer"><span data-i18n="Сменить тариф" data-i18n-en="Change plan">Сменить тариф</span> <svg class="ic forward" aria-hidden="true"><use href="#i-back"/></svg></a>
+    <p class="hint billing-change-hint" data-i18n="Выбор тарифа откроется в личном кабинете. Доступ и лимиты здесь обновляются автоматически." data-i18n-en="Plan selection opens in your web account. Access and limits here update automatically.">Выбор тарифа откроется в личном кабинете. Доступ и лимиты здесь обновляются автоматически.</p>
   </section>
 
   <!-- админ -->

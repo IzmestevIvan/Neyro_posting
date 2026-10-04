@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
   try {
     const page=await browser.newPage({viewport:{width:390,height:844}});
     page.on('pageerror',e=>errors.push(e.message));
-    await page.addInitScript(()=>{localStorage.setItem('neyro:tour_seen','1');});
+    await page.addInitScript(()=>{for(const id of [700,701]) localStorage.setItem(`neyro:welcome:v1:${id}`,'1');});
     await page.route('**/*',async route=>{
       const path=new URL(route.request().url()).pathname;
       if(path==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('app/miniapp/index.html','utf8')});
@@ -61,7 +61,8 @@ const assert = require('node:assert/strict');
     await page.locator('#nav [data-page="home"]').click();
     await page.locator('#exploreHome [data-go="billing"]').click();
     await page.waitForFunction(()=>!billingLoading);
-    await page.locator('#billingRefresh').click();
+    assert.equal(await page.locator('#billingChangePlan').getAttribute('href'),'/account#plans');
+    await page.evaluate(()=>{billingCheckedAt=0;return refreshBillingAutomatically();});
     await page.waitForFunction(()=>!billingLoading);
     await page.locator('#billingBack').click();
     assert.equal(await page.locator('#exploreHome').isVisible(),true);

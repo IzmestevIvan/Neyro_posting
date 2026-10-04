@@ -297,6 +297,13 @@ async function startAccount() {
     const pending = fromUrl || saved;
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pending || '')) { rememberOrder(pending); await checkOrder(); }
   }
+  revealRequestedPlans();
+}
+function revealRequestedPlans() {
+  if (location.hash !== '#plans') return;
+  const loggedIn = authenticated();
+  $(loggedIn ? '#plans' : '#accountAuth').scrollIntoView({block:'start'});
+  $(loggedIn ? '#accountPlans [data-plan]' : '#telegramLogin')?.focus({preventScroll:true});
 }
 $('#accountPlans').addEventListener('click', event => { const button = event.target.closest('[data-plan]'); if (button) selectPlan(button.dataset.plan); });
 $('#accountCheckout').addEventListener('click', checkout);
@@ -332,7 +339,7 @@ $('#telegramLogin').addEventListener('click', () => {
         notice('#accountNotice', error.message);
         try { state.session = await api('/account/session'); } catch {}
       }
-      finally { state.busy = false; renderSession(); renderPlans(); }
+      finally { state.busy = false; renderSession(); renderPlans(); revealRequestedPlans(); }
     });
   } catch { state.busy = false; renderSession(); notice('#loginStatus', 'Не удалось открыть вход Telegram. Попробуйте снова.'); }
 });
