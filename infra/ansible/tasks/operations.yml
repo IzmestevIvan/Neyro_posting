@@ -32,6 +32,15 @@
     - {src: '../../../scripts/operations/monitor.py', dest: neyro-ops-monitor}
     - {src: '../../../scripts/operations/control.py', dest: neyro-ops-control}
     - {src: '../../../scripts/resilience/alerts.py', dest: neyro_alerts.py}
+    - {src: '../../../scripts/resilience/image-transfer.py', dest: neyro-image-transfer}
+- name: Enable encrypted backup protocol on primary before updating reserve
+  ansible.builtin.copy:
+    src: ../../../scripts/resilience/export-backup.sh
+    dest: /usr/local/sbin/neyro-export-backup
+    owner: root
+    group: root
+    mode: '0755'
+  when: '"primary" in group_names'
 - name: Configure host role and limited recovery
   ansible.builtin.copy:
     dest: /etc/neyro-ops/config.json

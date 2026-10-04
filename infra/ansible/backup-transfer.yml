@@ -1,0 +1,42 @@
+---
+# Small ordered rollout: add protocol support to primary before switching reserve.
+- name: Install verified archive transfer on both existing hosts
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Install image transfer utility
+      ansible.builtin.copy:
+        src: ../../scripts/resilience/image-transfer.py
+        dest: /usr/local/sbin/neyro-image-transfer
+        owner: root
+        group: root
+        mode: '0755'
+- name: Enable the restricted export command first
+  hosts: primary
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Install backward compatible encrypted exporter
+      ansible.builtin.copy:
+        src: ../../scripts/resilience/export-backup.sh
+        dest: /usr/local/sbin/neyro-export-backup
+        owner: root
+        group: root
+        mode: '0755'
+- name: Switch the existing reserve timer to verified delta transfer
+  hosts: reserve
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Install updated backup procedure
+      ansible.builtin.copy:
+        src: ../../scripts/resilience/pull-backup.sh
+        dest: /usr/local/sbin/neyro-pull-backup
+        owner: root
+        group: root
+        mode: '0755'

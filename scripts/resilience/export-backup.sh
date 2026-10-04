@@ -4,6 +4,15 @@ set -euo pipefail
 umask 077
 cd /opt/neyro
 recipient=$(cat /etc/neyro-backup/recipient)
+# The only parameterized command accepts two strict image IDs, never paths/shell.
+if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^image-delta\ (sha256:[0-9a-f]{64})\ (sha256:[0-9a-f]{64})$ ]]; then
+  base_id=${BASH_REMATCH[1]}
+  target_id=${BASH_REMATCH[2]}
+  exec 9>/run/lock/neyro-export.lock
+  flock -w 120 9
+  /usr/local/sbin/neyro-image-transfer export "$base_id" "$target_id" | age -r "$recipient"
+  exit
+fi
 case "${SSH_ORIGINAL_COMMAND:-snapshot}" in
   image)
     docker image save neyro-posting:latest | age -r "$recipient"

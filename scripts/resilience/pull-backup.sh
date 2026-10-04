@@ -27,13 +27,17 @@ age -d -i "$config/backup.agekey" "$stage/snapshot.tar.gz.age" | tar xzf - -C "$
 image_id=$(cat "$stage/image-id")
 [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$image_id" >/dev/null 2>&1; then
-  ssh "${ssh_args[@]}" "$primary" image | age -d -i "$config/backup.agekey" | docker image load >/dev/null
+  if test -s "$root/app-image-id"; then base_id=$(cat "$root/app-image-id"); else base_id=$(docker image inspect neyro-posting:latest --format '{{.Id}}'); fi
+  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $image_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$image_id"
   docker image inspect "$image_id" >/dev/null
 fi
 proxy_id=$(cat "$stage/proxy-image-id")
 [[ "$proxy_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
 if ! docker image inspect "$proxy_id" >/dev/null 2>&1; then
-  ssh "${ssh_args[@]}" "$primary" proxy-image | age -d -i "$config/backup.agekey" | docker image load >/dev/null
+  if test -s "$root/proxy-image-id"; then base_id=$(cat "$root/proxy-image-id"); else base_id=$(docker image inspect neyro-caddy:recovery --format '{{.Id}}'); fi
+  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $proxy_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$proxy_id"
   docker image inspect "$proxy_id" >/dev/null
 fi
 # Restore into a disposable, network-isolated PostgreSQL. Never invoke the bot.
@@ -53,6 +57,8 @@ docker exec "$container" psql -U postgres -d restorecheck -v ON_ERROR_STOP=1 -At
 # Publish only a fully verified archive. Retention is controlled on reserve only.
 mv "$stage/snapshot.tar.gz.age" "$root/snapshots/$stamp.tar.gz.age"
 cp "$stage/restore-counts" "$root/last-restore-counts"
+cp "$stage/image-id" "$root/app-image-id"
+cp "$stage/proxy-image-id" "$root/proxy-image-id"
 printf '%s\n' "$stamp" > "$root/last-success.tmp"
 mv "$root/last-success.tmp" "$root/last-success"
 ln -sfn "snapshots/$stamp.tar.gz.age" "$root/latest.age"
