@@ -11,6 +11,7 @@
 <body>
 
 <svg class="sprite" aria-hidden="true">
+  <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16a8 8 0 0 0 0-16" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h4l2 3h6l2-3h4"/><path d="M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
   <symbol id="i-ads" viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/><path d="M20 5a9 9 0 0 1 0 14"/></symbol>
@@ -58,14 +59,8 @@
         <p id="status" class="status">—</p>
       </div>
     </div>
-    <div class="header-actions"><button id="openTutorial" class="ghost square" data-tutorial aria-label="Как работает Нейропостинг" data-i18n-aria-label="Как работает Нейропостинг" data-i18n-aria-label-en="How NeuroPost works" title="Как работает Нейропостинг" data-i18n-title="Как работает Нейропостинг" data-i18n-title-en="How NeuroPost works">?</button><button class="profile-button" data-go="billing" aria-label="Мой тариф" data-i18n-aria-label="Мой тариф" data-i18n-aria-label-en="My plan"><span id="profileInitial"><span data-i18n="Н" data-i18n-en="N">Н</span></span></button>
-    <button id="openAdmin" class="ghost" hidden title="Админ-панель" data-i18n-title="Админ-панель" data-i18n-title-en="Admin dashboard">
-      <svg class="ic"><use href="#i-shield"/></svg>
-    </button></div>
-  </header>
-
-  <details class="interface-preferences">
-    <summary><span data-i18n="Тема и язык" data-i18n-en="Theme and language">Тема и язык</span></summary>
+    <div class="header-actions"><button id="openTutorial" class="ghost square" data-tutorial aria-label="Как работает Нейропостинг" data-i18n-aria-label="Как работает Нейропостинг" data-i18n-aria-label-en="How NeuroPost works" title="Как работает Нейропостинг" data-i18n-title="Как работает Нейропостинг" data-i18n-title-en="How NeuroPost works">?</button><details class="interface-preferences" id="appearancePreferences">
+    <summary aria-label="Тема и язык" data-i18n-aria-label="Тема и язык" data-i18n-aria-label-en="Theme and language" title="Тема и язык" data-i18n-title="Тема и язык" data-i18n-title-en="Theme and language"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></summary>
     <div class="preferences">
       <label><span data-i18n="Оформление" data-i18n-en="Appearance">Оформление</span><select data-pref-theme>
         <option value="system" data-i18n="Как на устройстве" data-i18n-en="Use device setting">Как на устройстве</option>
@@ -78,8 +73,15 @@
       </select></label>
     </div>
   </details>
+    <button id="openAdmin" class="ghost" hidden title="Админ-панель" data-i18n-title="Админ-панель" data-i18n-title-en="Admin dashboard">
+      <svg class="ic"><use href="#i-shield"/></svg>
+    </button></div>
+  </header>
+
+
 
   <div class="channelbar" id="channelBar">
+    <span class="channel-avatar" aria-hidden="true">#</span>
     <div class="select-wrap">
       <select id="channelSelect" aria-label="Текущий канал" data-i18n-aria-label="Текущий канал" data-i18n-aria-label-en="Current channel"></select>
     </div>
@@ -93,6 +95,7 @@
     <button id="channelSubmit" aria-label="Подключить канал" class="accent square" data-i18n-aria-label="Подключить канал" data-i18n-aria-label-en="Connect channel"><svg class="ic"><use href="#i-check"/></svg></button>
   </div>
 
+  <div id="workspaceScroll" class="workspace-scroll">
   <!-- ворота по промокоду -->
   <section id="gate" class="page" hidden>
     <div class="card hero">
@@ -430,11 +433,13 @@
     <div id="adminChannels"></div>
   </section>
 
+  </div>
+
   <nav class="nav" id="nav" aria-label="Основная навигация" data-i18n-aria-label="Основная навигация" data-i18n-aria-label-en="Main navigation">
     <button data-page="home" class="active"><svg class="ic"><use href="#i-home"/></svg><span><span data-i18n="Главная" data-i18n-en="Home">Главная</span></span></button>
     <button data-page="feed"><svg class="ic"><use href="#i-inbox"/></svg><span><span data-i18n="Посты" data-i18n-en="Posts">Посты</span></span><i id="feedBadge" class="badge" hidden></i></button>
     <button data-page="sources"><svg class="ic"><use href="#i-sources"/></svg><span data-i18n="Источники" data-i18n-en="Sources">Источники</span></button>
-    <button data-page="settings"><svg class="ic"><use href="#i-settings"/></svg><span><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></span></button>
+    <button data-page="settings"><span id="profileInitial" class="nav-avatar" aria-hidden="true">N</span><span><span data-i18n="Настройки" data-i18n-en="Settings">Настройки</span></span></button>
   </nav>
 </main>
 

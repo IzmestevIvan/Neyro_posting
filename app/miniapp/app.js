@@ -214,7 +214,7 @@ async function loadFeed() {
         ? `<p class="note warn">${icon('alert')}<span>${tr("Фактчек:","Fact-check:")} ${esc(post.fact_check.verdict || tr("есть замечания","issues found"))}</span></p>` : `<p class="note ${post.fact_check?.ok === true ? 'ok' : ''}">${icon('shield')}<span>${post.fact_check?.ok === true ? tr("Проверка пройдена · сверьте важные факты с оригиналом","Checks passed · verify important facts against the original") : tr("Без финального фактчека · проверьте текст перед публикацией","No final fact-check · review before publishing")}</span></p>`;
       return `<article class="post" data-id="${post.id}" data-media-revision="${esc(post.media_revision || '')}">
         <header>
-          <span>${esc(post.source_title || tr("источник","source"))} · ${ago(post.created_at) || ''}</span>
+          <span class="post-avatar" aria-hidden="true">${esc((post.source_title || 'N').slice(0,1).toUpperCase())}</span><span class="post-byline"><b>${esc(post.source_title || tr("источник","source"))}</b><time>${ago(post.created_at) || ''}</time></span>
           ${post.url ? `<a href="${esc(safeLink(post.url))}" target="_blank" rel="noopener noreferrer">${icon('link')}${tr('оригинал','original')}</a>` : ''}
         </header>
         ${photo ? `<img src="${esc(photoUrl)}" loading="lazy" alt="${tr('Фото к посту — проверьте перед согласованием','Post photo — review before approval')}">` : ''}
@@ -983,6 +983,7 @@ $('#promoPlan').addEventListener('change', event => {
 });
 
 $('#openAdmin').addEventListener('click', () => {
+  $('#workspaceScroll').scrollTop = 0;
   adminOpen = true;
   $$('.page').forEach((s) => (s.hidden = s.id !== 'page-admin'));
   $('#nav').hidden = true;
@@ -1124,8 +1125,14 @@ function openPage(name) {
   if (!boot?.user.has_access && name !== 'billing') return showGate();
   if (!channel && name !== 'billing' && !exploring) return;
   if (name === 'billing' && page !== 'billing') billingReturnPage = page;
+  const changed = page !== name;
   page = name;
-  $$('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === (name === 'billing' ? 'settings' : name === 'ads' ? 'feed' : name)));
+  $$('.nav button').forEach((b) => {
+    const active = b.dataset.page === (name === 'billing' ? 'settings' : name === 'ads' ? 'feed' : name);
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-current', active ? 'page' : 'false');
+  });
+  if (changed) $('#workspaceScroll').scrollTop = 0;
   $$('.page').forEach((s) => (s.hidden = s.id !== `page-${name}`));
   if (exploring && !channel) renderExploreWorkspace();
   const load = PAGE_LOADERS[name];
@@ -1135,6 +1142,7 @@ function openPage(name) {
 $$('.nav button').forEach((b) => b.addEventListener('click', () => openPage(b.dataset.page)));
 
 function showOnly(id) {
+  $('#workspaceScroll').scrollTop = 0;
   $$('.page').forEach((s) => (s.hidden = s.id !== id));
   $('#nav').hidden = true;
   $('#channelBar').hidden = true;
@@ -1206,7 +1214,7 @@ function renderExploreWorkspace() {
   $('#channelSelect').innerHTML = `<option>${tr('Канал пока не подключён','No channel connected yet')}</option>`;
   $('#channelSelect').disabled = true;
   $('#exploreHome').innerHTML = `
-    <div class="explore-intro"><div><span class="eyebrow">${tr('СНАЧАЛА ОСМОТРИТЕСЬ','MAKE YOURSELF AT HOME')}</span><h2>${tr('Ваша новая<br>редакция.','Your new<br>workspace.')}</h2><p>${tr('Здесь материалы превращаются в публикации. Изучите инструменты в своём темпе — канал подключите, когда будете готовы.','This is where source material becomes a published post. Explore the tools at your own pace, then connect a channel when you are ready.')}</p><div class="explore-actions"><button class="accent" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button><button class="text-link" data-explore-tutorial>${tr('Как всё работает','How it works')} ${icon('back')}</button></div></div><div class="editorial-index" aria-hidden="true"><span>N / P</span><div></div><small>${tr('МАТЕРИАЛ → ПОСТ','SOURCE → POST')}</small></div></div>
+    <div class="explore-intro"><div><span class="eyebrow">${tr('НЕЙРОПОСТИНГ','NEUROPOST')}</span><h2>${tr('Добро пожаловать<br>в редакцию','Welcome to<br>your workspace')}</h2><p>${tr('Источники, черновики и публикации — в одном месте. Осмотритесь и подключите канал, когда будете готовы.','Sources, drafts and posts in one place. Explore your workspace and connect a channel when you’re ready.')}</p><div class="explore-actions"><button class="accent" data-connect-channel>${tr('Подключить канал','Connect a channel')} ${icon('plus')}</button><button class="text-link" data-explore-tutorial>${tr('Как всё работает','How it works')} ${icon('back')}</button></div></div></div>
     <div class="explore-section-head"><h3>${tr('От источника до публикации','From source to publication')}</h3><span>01 — 03</span></div>
     <div class="workflow-list">${[
       ['sources','01',tr('Соберите свои источники','Bring your sources'),tr('Telegram-каналы и RSS. Вы решаете, откуда брать материалы.','Telegram channels and RSS. You decide where content comes from.'),'sources'],
@@ -1244,6 +1252,25 @@ $('#skipChannel').addEventListener('click',()=>enterExploreMode());
 $('#app').addEventListener('click',event=>{
   if(event.target.closest('[data-connect-channel]')) showOnboarding();
   if(event.target.closest('[data-explore-tutorial]')) setupTour();
+});
+
+/* The mobile frame follows the visible viewport, including the on-screen keyboard. */
+function syncWorkspaceViewport() {
+  const height = window.visualViewport?.height || window.innerHeight;
+  if (height > 0) document.documentElement?.style?.setProperty('--app-height', `${height}px`);
+}
+window.addEventListener?.('resize', syncWorkspaceViewport);
+window.visualViewport?.addEventListener('resize', syncWorkspaceViewport);
+syncWorkspaceViewport();
+document.addEventListener?.('click', event => {
+  if (!event.target.closest('.interface-preferences')) $('#appearancePreferences').open = false;
+});
+document.addEventListener?.('keydown', event => {
+  const preferences = $('#appearancePreferences');
+  if (event.key === 'Escape' && preferences.open) {
+    preferences.open = false;
+    preferences.querySelector('summary').focus();
+  }
 });
 
 /* ---------- guided tutorial ---------- */
