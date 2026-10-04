@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 
-def next_state(previous, healthy, now):
+def next_state(previous, healthy, now, *, reminder_interval=3600):
     state = dict(previous)
     failures = 0 if healthy else previous.get('failures', 0) + 1
     state['failures'] = failures
@@ -16,7 +16,7 @@ def next_state(previous, healthy, now):
     # Preserve an active alarm until an actual healthy observation.
     state['active'] = active or (was_active and not healthy)
     event = None
-    if state['active'] and (not was_active or now - previous.get('sent_at', 0) >= 3600):
+    if state['active'] and (not was_active or now - previous.get('sent_at', 0) >= reminder_interval):
         event = 'failure'
     elif was_active and healthy:
         event = 'recovery'
@@ -85,7 +85,7 @@ def clean_state(value, now):
     }
 
 
-def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/neyro-reserve/alerts.json'), *, labels=None, source=None):
+def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/neyro-reserve/alerts.json'), *, labels=None, source=None, reminder_intervals=None):
     config = load_config(config_path)
     if config is None:
         return
@@ -98,6 +98,7 @@ def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/n
         print('Alert state is unavailable or invalid; restarting observation counters')
         previous = {}
     now = time.time()
+    reminder_intervals = reminder_intervals or {}
     labels = labels or {'primary_healthy': 'основной сервер недоступен', 'backup_fresh': 'нет свежей проверенной резервной копии'}
     result = {'version': 2, 'recipients': {}}
     recipients = previous.get('recipients', {})
@@ -112,7 +113,8 @@ def notify(checks, root=Path('/var/lib/neyro-reserve'), config_path=Path('/etc/n
         result['recipients'][str(admin)] = current_checks = {}
         for key, label in labels.items():
             old = clean_state(old_checks.get(key), now)
-            current, event = next_state(old, checks.get(key) is True, now)
+            current, event = next_state(old, checks.get(key) is True, now,
+                                        reminder_interval=reminder_intervals.get(key, 3600))
             if event:
                 text = ('NeuroPost: ' + label + '. Проверка с резервного сервера. Автоматическое переключение не выполнялось.'
                         if event == 'failure' else 'NeuroPost: восстановлено — ' + ('основной сервер доступен.' if key == 'primary_healthy' else 'проверенная резервная копия свежая.'))

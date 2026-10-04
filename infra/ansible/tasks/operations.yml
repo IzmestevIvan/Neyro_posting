@@ -29,9 +29,10 @@
     owner: root
     group: root
   loop:
+    # Install the compatible helper before callers that use new alert options.
+    - {src: '../../../scripts/resilience/alerts.py', dest: neyro_alerts.py}
     - {src: '../../../scripts/operations/monitor.py', dest: neyro-ops-monitor}
     - {src: '../../../scripts/operations/control.py', dest: neyro-ops-control}
-    - {src: '../../../scripts/resilience/alerts.py', dest: neyro_alerts.py}
     - {src: '../../../scripts/resilience/image-transfer.py', dest: neyro-image-transfer}
 - name: Enable encrypted backup protocol on primary before updating reserve
   ansible.builtin.copy:
