@@ -299,9 +299,16 @@ async function startAccount() {
   }
   revealRequestedPlans();
 }
-function revealRequestedPlans() {
+let requestedPlanHandled = false;
+async function revealRequestedPlans() {
   if (location.hash !== '#plans') return;
   const loggedIn = authenticated();
+  const requested = new URLSearchParams(location.search).get('plan');
+  if (loggedIn && PLAN_CODES.has(requested) && !requestedPlanHandled) {
+    requestedPlanHandled = true;
+    await selectPlan(requested);
+    if (state.quote) return;
+  }
   $(loggedIn ? '#plans' : '#accountAuth').scrollIntoView({block:'start'});
   $(loggedIn ? '#accountPlans [data-plan]' : '#telegramLogin')?.focus({preventScroll:true});
 }

@@ -29,10 +29,15 @@ let publishingNow = false;
 let subscription = null;
 let billingLoading = false;
 let billingCheckedAt = 0;
+let billingCatalog = null;
+let billingCatalogLoading = false;
+let selectedPlanCode = null;
+const BILLING_PLAN_CODES = new Set(['plus','pro','expert','creator','unlimited']);
 let billingReturnPage = 'home';
 let exploring = false;
 const exploreDisabled = new Map();
 const drafts = new Map();
+const accountId = () => boot?.user?.id ?? boot?.user?.tg_id;
 const readTicket = (key) => { const token = (revisions[key] || 0) + 1; revisions[key] = token; const id = channel?.id; return () => channel?.id === id && revisions[key] === token; };
 const safeLink = (value) => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
 
@@ -612,8 +617,8 @@ async function loadBilling() {
       if (exploring) leaveExploreMode();
       renderChannelList(); fillSettings();
     }
-    $('#nav').hidden = (!channel && !exploring) || !boot.user.has_access;
-    $('#channelBar').hidden = (!channel && !exploring) || !boot.user.has_access;
+    $('#nav').hidden = adminOpen || (!channel && !exploring) || !boot.user.has_access;
+    $('#channelBar').hidden = adminOpen || (!channel && !exploring) || !boot.user.has_access;
     if (!boot.user.has_access && page !== 'billing') {
       // Keep channel drafts in memory while the access screen is shown.
       $('#status').textContent = tr('доступ не активирован','access not active');
@@ -623,6 +628,7 @@ async function loadBilling() {
       else exploreWasChosen() ? enterExploreMode() : showOnboarding();
     }
     renderPlan();
+    if (!$('#billingPlans').hidden) renderPlanChoices();
     $('#billingAvailability').hidden = true;
   } catch (error) {
     const message = error.name === 'AbortError' ? tr('Сервер не ответил вовремя','The server did not respond in time') : error.message;
@@ -640,10 +646,70 @@ function refreshBillingAutomatically(force = false) {
 document.addEventListener?.('visibilitychange', () => { if (!document.hidden) refreshBillingAutomatically(true); });
 window.addEventListener?.('focus', () => refreshBillingAutomatically(true));
 tg?.onEvent?.('activated', () => refreshBillingAutomatically(true));
-$('#billingChangePlan').addEventListener('click', event => {
-  // The separate web account handles plan selection and its own authentication.
+function renderPlanChoices() {
+  const plans = billingCatalog?.plans || [];
+  $('#billingPlanOptions').innerHTML = plans.map(plan => {
+    const current = subscription?.status === 'active' && subscription.current_plan === plan.code;
+    const selected = selectedPlanCode === plan.code;
+    const price = Number(plan.price_rub).toLocaleString(uiLocale());
+    return `<button class="plan-option${selected ? ' selected' : ''}" data-plan-choice="${plan.code}" aria-pressed="${selected}"><span class="plan-option-name"><b>${esc(plan.code.toUpperCase())}</b><small>${current ? tr('Текущий тариф','Current plan') : tr(`${plan.ai_daily_limit} постов с ИИ в день`,`${plan.ai_daily_limit} AI posts per day`)}</small>${current ? `<small>${tr(`${plan.ai_daily_limit} постов с ИИ в день`,`${plan.ai_daily_limit} AI posts per day`)}</small>` : ''}</span><span class="plan-option-price">${price} ₽<small>${tr('в месяц','per month')}</small></span><span class="plan-option-check" aria-hidden="true">${selected ? icon('check') : ''}</span></button>`;
+  }).join('');
+  $('#billingPlansStatus').textContent = billingCatalogLoading ? tr('Загружаем тарифы…','Loading plans…') : !billingCatalog ? tr('Не удалось загрузить тарифы.','Could not load plans.') : !billingCatalog.checkout_available ? tr('Оплата временно недоступна. Пока можно сравнить тарифы.','Payments are temporarily unavailable. You can still compare plans.') : '';
+  $('#billingPlansRetry').hidden = !!billingCatalog || billingCatalogLoading;
+  const selected = plans.find(plan => plan.code === selectedPlanCode);
+  $('#billingPlanSelection').hidden = !selected;
+  if (!selected) { $('#billingPlanSelection').innerHTML = ''; return; }
+  const current = subscription?.status === 'active' ? plans.find(plan => plan.code === subscription.current_plan) : null;
+  const terms = current && selected.price_rub > current.price_rub
+    ? tr('Повышение — с доплатой за оставшееся время. Точную сумму покажет кабинет перед оплатой.','An upgrade costs the difference for the remaining time. Your account will show the exact amount before payment.')
+    : current && selected.price_rub < current.price_rub
+      ? tr('До конца периода действует текущий тариф. Этот план можно выбрать для следующего ручного продления.','Your current plan lasts until the end of this period. Choose this plan for the next manual renewal.')
+      : tr('Один месяц доступа, без автоматических списаний.','One month of access, with no automatic charges.');
+  $('#billingPlanSelection').innerHTML = `<b>${tr('Вы выбрали','You selected')} ${esc(selected.code.toUpperCase())}</b><p class="hint">${terms}</p><a id="billingContinue" class="billing-change-plan" href="/account?plan=${selected.code}#plans" target="_blank" rel="noopener noreferrer">${tr('Продолжить в кабинете','Continue in web account')} ${icon('back')}</a><p class="hint">${tr('Следующий шаг откроется на сайте. Войдите тем же Telegram-аккаунтом и подтвердите выбор. Сам выбор здесь не меняет ваш доступ.','The next step opens on the website. Sign in with the same Telegram account and confirm your choice. Selecting a plan here does not change your access.')}</p>`;
+}
+async function loadPlanChoices() {
+  if (billingCatalogLoading) return;
+  billingCatalogLoading = true;
+  renderPlanChoices();
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(),15000);
+  try {
+    const data = await api('/billing/catalog',{cache:'no-store',signal:controller.signal});
+    if (!Array.isArray(data.plans)) throw new Error('Invalid catalog');
+    const plans = data.plans.filter(plan=>BILLING_PLAN_CODES.has(plan.code) && Number.isFinite(plan.price_rub) && plan.price_rub>0 && Number.isInteger(plan.ai_daily_limit) && plan.ai_daily_limit>0);
+    if (plans.length!==5 || new Set(plans.map(plan=>plan.code)).size!==5) throw new Error('Incomplete catalog');
+    billingCatalog = {...data,plans:plans.sort((a,b)=>a.price_rub-b.price_rub)};
+  } catch { billingCatalog = null; }
+  finally { clearTimeout(timeout); billingCatalogLoading=false; renderPlanChoices(); }
+}
+$('#billingChangePlan').addEventListener('click', () => {
+  $('#billingPlans').hidden = false;
+  $('#billingChangePlan').hidden = true;
+  $('#billingChangePlan').setAttribute('aria-expanded','true');
+  $('#billingPlansTitle').focus({preventScroll:true});
+  $('#billingPlans').scrollIntoView({block:'start'});
+  loadPlanChoices();
+});
+$('#billingCancelChange').addEventListener('click', () => {
+  $('#billingPlans').hidden = true;
+  $('#billingChangePlan').hidden = false;
+  $('#billingChangePlan').setAttribute('aria-expanded','false');
+  $('#billingChangePlan').focus();
+});
+$('#billingPlansRetry').addEventListener('click', loadPlanChoices);
+$('#billingPlanOptions').addEventListener('click', event => {
+  const code = event.target.closest('[data-plan-choice]')?.dataset.planChoice;
+  if (!billingCatalog?.plans.some(plan=>plan.code===code)) return;
+  selectedPlanCode = code;
+  renderPlanChoices();
+  $('#billingContinue').focus({preventScroll:true});
+  $('#billingPlanSelection').scrollIntoView({block:'nearest'});
+});
+$('#billingPlanSelection').addEventListener('click', event => {
+  const link = event.target.closest('#billingContinue');
+  if (!link) return;
   if (tg?.initData && tg.openLink) {
-    try { tg.openLink(new URL('/account#plans',location.origin).href); event.preventDefault(); }
+    try { tg.openLink(new URL(link.getAttribute('href'),location.origin).href); event.preventDefault(); }
     catch { /* Keep the native link available when the client cannot open it. */ }
   }
 });
@@ -1211,13 +1277,13 @@ function enterNormalMode() {
 
 /* An account can explore the real workspace without creating a channel. */
 function exploreWasChosen() {
-  try { return localStorage.getItem(`neyro:explore:${boot.user.tg_id}`) === '1'; } catch { return false; }
+  try { return localStorage.getItem(`neyro:explore:${accountId()}`) === '1'; } catch { return false; }
 }
 function enterExploreMode(name = 'home') {
   if (!boot?.user.has_access) return showGate();
   if (channel) return openPage(name);
   exploring = true;
-  try { localStorage.setItem(`neyro:explore:${boot.user.tg_id}`, '1'); } catch {}
+  try { localStorage.setItem(`neyro:explore:${accountId()}`, '1'); } catch {}
   document.body.classList.add('exploring');
   $('#nav').hidden = false;
   $('#channelBar').hidden = false;
@@ -1298,9 +1364,21 @@ let welcomeFinished = false;
 let welcomeTimer = null;
 let welcomeReturnFocus = null;
 const welcomeMotionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-const welcomeStorageKey = () => `neyro:welcome:v1:${boot?.user?.tg_id ?? 'guest'}`;
+const welcomeStorageKey = () => `neyro:welcome:v1:${accountId()}`;
+const welcomeShown = new Set();
 function welcomeSeen() {
-  try { return localStorage.getItem(welcomeStorageKey()) === '1'; } catch { return false; }
+  if (boot?.channels?.length || channel || !accountId()) return true;
+  const key = welcomeStorageKey();
+  if (welcomeShown.has(key)) return true;
+  try { if (localStorage.getItem(key) === '1') return true; } catch {}
+  try { return sessionStorage.getItem(key) === '1'; } catch { return false; }
+}
+function rememberWelcome() {
+  if (!accountId()) return;
+  const key = welcomeStorageKey();
+  welcomeShown.add(key);
+  try { localStorage.setItem(key,'1'); } catch {}
+  try { sessionStorage.setItem(key,'1'); } catch {}
 }
 function renderWelcomeMotion() {
   $('#welcome').dataset.step = String(welcomeStep);
@@ -1340,7 +1418,7 @@ function playWelcomeAnimation() {
 }
 function closeWelcome() {
   pauseWelcomeAnimation();
-  try { localStorage.setItem(welcomeStorageKey(),'1'); } catch { /* Private mode may block storage. */ }
+  rememberWelcome();
   $('#welcome').hidden = true;
   $('#app').inert = false;
   document.body.classList.remove('welcome-open');
@@ -1359,7 +1437,9 @@ function welcomeKeyboard(event) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 function openWelcome() {
-  if (!boot || !$('#welcome').hidden || !$('#tour').hidden) return;
+  if (!boot || boot.channels?.length || channel || !$('#welcome').hidden || !$('#tour').hidden) return;
+  // A visit counts when shown, even if Telegram is closed before pressing a button.
+  rememberWelcome();
   welcomeReturnFocus = document.activeElement;
   $('#appearancePreferences').open = false;
   $('#welcome').hidden = false;
@@ -1423,7 +1503,7 @@ const TUTORIAL_COPY = {
       {id:'limits', icon:'bolt', short:'Доступ', title:'Один дневной лимит на аккаунт',
         intro:'Раздел «Мой тариф» показывает подключённый доступ, остаток и дату окончания.',
         items:['Лимит публикаций общий для всех ваших каналов. Например, при лимите 5 и трёх публикациях в одном канале на остальные остаётся 2.', 'Новый день для лимита начинается в 00:00 UTC — это 03:00 по Москве. Часовой пояс расписания этот момент не меняет.', 'Продление ручное, без автосписаний. Повышение тарифа действует после доплаты за остаток периода; понижение — со следующего периода.'],
-        note:'Доступ и лимиты обновляются автоматически. «Сменить тариф» открывает выбор в личном кабинете. Отправляемый пост или отправка с неясным результатом могут временно занимать место в лимите.', action:'billing', label:'Посмотреть мой доступ'},
+        note:'Доступ и лимиты обновляются автоматически. «Сменить тариф» показывает планы здесь; подтверждение и оплата — в отдельном кабинете. Отправляемый пост или отправка с неясным результатом могут временно занимать место в лимите.', action:'billing', label:'Посмотреть мой доступ'},
       {id:'recovery', icon:'shield', short:'Помощь', title:'Если пост не появился',
         intro:'Проверяйте причину по порядку — повторная отправка не всегда нужна.',
         items:['На главной проверьте доступ, дневной остаток, паузу, источники и окно публикации. В «Постах» может ждать черновик.', 'Откройте «Историю»: там видны отсев, ошибка или ожидание. При статусе «Нужна сверка с каналом» или частичной отправке сначала проверьте сам Telegram-канал.', 'Подтверждайте результат сверки только после проверки текста и медиа. Если причина неясна, обратитесь в поддержку из настроек и укажите канал, время и текст ошибки.'],
@@ -1466,7 +1546,7 @@ const TUTORIAL_COPY = {
       {id:'limits',icon:'bolt',short:'Access',title:'One daily limit for your account',
         intro:'“My plan” shows your existing access, remaining allowance and expiry date.',
         items:['All your channels share the daily publishing limit. With a limit of 5, publishing 3 posts in one channel leaves 2 for the others.', 'The limit resets at 00:00 UTC, or 03:00 in Moscow. The scheduling time zone does not change this reset.', 'Renewals are manual, with no automatic charges. An upgrade starts after the prorated payment; a downgrade starts next period.'],
-        note:'Access and limits update automatically. “Change plan” opens the choices in your web account. Posts being sent or awaiting delivery verification may reserve a daily slot.',action:'billing',label:'View my access'},
+        note:'Access and limits update automatically. “Change plan” shows the plans here; confirm and pay in the separate web account. Posts being sent or awaiting delivery verification may reserve a daily slot.',action:'billing',label:'View my access'},
       {id:'recovery',icon:'shield',short:'Help',title:'If a post has not appeared',
         intro:'Check the cause in order. Sending again is not always the answer.',
         items:['On the home screen, check access, remaining allowance, pause, sources and the publishing window. A draft may be waiting in “Posts”.', 'Open “History” for filters, errors or waiting. If delivery is uncertain or partial, check the actual Telegram channel first.', 'Confirm delivery only after checking both text and media. If unclear, contact support from Settings with the channel, time and error message.'],
@@ -1602,6 +1682,7 @@ function refreshInterfaceLanguage() {
   window.NeyroPrefs?.apply(document);
   if (!boot) return;
   renderPlan();
+  if (!$('#billingPlans').hidden) renderPlanChoices();
   if (!channel) {
     if (exploring && boot.user.has_access) renderExploreWorkspace();
     else $('#status').textContent = boot.user.has_access ? tr('канал ещё не подключён','no channel connected yet') : tr('доступ не активирован','access not active');

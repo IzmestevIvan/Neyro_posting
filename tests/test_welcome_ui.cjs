@@ -6,7 +6,8 @@ const assert=require('node:assert/strict');
  const chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||(fs.existsSync(chrome)?chrome:undefined)});
  const out=process.env.VISUAL_OUTPUT||'/private/tmp/neyro-welcome';fs.mkdirSync(out,{recursive:true});
- let userId=810,access=true,captures=0;
+ let userId=810,access=true,connected=false,captures=0;
+ const channelData={id:9,title:"Existing channel",username:"existing",quality:"balanced",lang:"ru",tz:"Europe/Moscow",pace:"6",delay_mode:"10-30",autopost:0,paused:0,window_start:8,window_end:23,digest_enabled:0,digest_time:"21:00"};
  const errors=[],requests=[];
  try{
   const p=await browser.newPage({viewport:{width:390,height:844},locale:'ru-RU',colorScheme:'dark'});
@@ -20,8 +21,9 @@ const assert=require('node:assert/strict');
    }
    if(!path.startsWith('/api/'))return route.fulfill({contentType:'text/javascript',body:''});
    requests.push({path,method:route.request().method()});
-   const data=path==='/api/bootstrap'?{channels:[],features:{business_mode:false},user:{tg_id:userId,first_name:'Анна',has_access:access,is_admin:false,max_channels:3,daily_limit:10},languages:{ru:'Русский',en:'English'},timezones:['Europe/Moscow'],bot_username:'fixture_bot'}
-    :path==='/api/billing/subscription'?{status:access?'active':'inactive',current_plan:null,ai_daily_limit:10,ai_used_today:0}:[];
+   const data=path==='/api/bootstrap'?{channels:connected?[channelData]:[],features:{business_mode:false},user:{id:userId,first_name:'Анна',has_access:access,is_admin:false,max_channels:3,daily_limit:10},languages:{ru:'Русский',en:'English'},timezones:['Europe/Moscow'],bot_username:'fixture_bot'}
+    :path==='/api/billing/subscription'?{status:access?'active':'inactive',current_plan:null,ai_daily_limit:10,ai_used_today:0}
+    :path.endsWith('/stats')?{today:0,pending:0,remaining:10,sources:0,queued:0,mode:'review',blockers:[],posts_chart:[],subscribers_chart:[],waiting:{}}:[];
    return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
   });
   await p.goto('https://welcome.test/');
@@ -31,6 +33,12 @@ const assert=require('node:assert/strict');
   assert.equal(await p.locator('#app').evaluate(el=>el.inert),true);
   assert.equal(await p.locator('.welcome-steps li').count(),4);
   assert.equal(await p.evaluate(()=>localStorage.getItem('neyro:tutorial_v2')),null);
+  // Count the first display: closing Telegram without pressing a button must not repeat it.
+  assert.equal(await p.evaluate(()=>localStorage.getItem('neyro:welcome:v1:810')),'1');
+  assert.equal(await p.evaluate(()=>localStorage.getItem('neyro:welcome:v1:guest')),null);
+  await p.reload();await p.locator('#onboarding').waitFor({state:'visible'});
+  assert.equal(await p.locator('#welcome').isVisible(),false);
+  await p.evaluate(()=>openWelcome());
   // Pausing keeps the current stage; completion never advances into the app by itself.
   await p.locator('#welcomeMotion').click();
   const paused=await p.locator('#welcome').getAttribute('data-step');
@@ -120,6 +128,17 @@ const assert=require('node:assert/strict');
   assert.equal(await p.locator('#gate').isVisible(),true);
   assert.equal(await p.locator('#tour').isVisible(),false);
   assert.ok(requests.every(r=>r.method==='GET' && !r.path.includes('/channels')));
+  // Real bootstrap uses user.id. Existing channels suppress welcome even on a fresh device.
+  userId=813;connected=true;access=true;
+  await p.addInitScript(()=>{Storage.prototype.getItem=()=>{throw new Error('blocked')};Storage.prototype.setItem=()=>{throw new Error('blocked')};});
+  await p.reload();await p.locator('#homeConnected').waitFor({state:'visible'});
+  await p.waitForFunction(()=>!billingLoading);
+  assert.equal(await p.locator('#welcome').isVisible(),false);
+  await p.evaluate(()=>openWelcome());
+  assert.equal(await p.locator('#welcome').isVisible(),false);
+  await p.reload();await p.locator('#homeConnected').waitFor({state:'visible'});
+  assert.equal(await p.locator('#welcome').isVisible(),false);
+  assert.ok(requests.every(r=>r.method==='GET'));
   assert.deepEqual(errors,[]);
   console.log(`Welcome UI: first visit, manual guide, replay/pause, focus, persistence, reduced motion, access gate, blocked storage and ${captures} phase captures passed`);
  }finally{await browser.close();}

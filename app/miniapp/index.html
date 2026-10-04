@@ -408,8 +408,16 @@
     <div id="planCard" class="card current-plan" aria-live="polite"></div>
     <p class="hint"><span data-i18n="Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве." data-i18n-en="Your daily AI post limit is shared across all channels and resets at 00:00 UTC (03:00 Moscow time).">Лимит постов с ИИ общий для всех ваших каналов и обновляется каждый день в 03:00 по Москве.</span></p>
     <p id="billingAvailability" class="notice" role="status" hidden></p>
-    <a id="billingChangePlan" class="billing-change-plan" href="/account#plans" target="_blank" rel="noopener noreferrer"><span data-i18n="Сменить тариф" data-i18n-en="Change plan">Сменить тариф</span> <svg class="ic forward" aria-hidden="true"><use href="#i-back"/></svg></a>
-    <p class="hint billing-change-hint" data-i18n="Выбор тарифа откроется в личном кабинете. Доступ и лимиты здесь обновляются автоматически." data-i18n-en="Plan selection opens in your web account. Access and limits here update automatically.">Выбор тарифа откроется в личном кабинете. Доступ и лимиты здесь обновляются автоматически.</p>
+    <button id="billingChangePlan" class="billing-change-plan" aria-expanded="false" aria-controls="billingPlans"><span data-i18n="Сменить тариф" data-i18n-en="Change plan">Сменить тариф</span> <svg class="ic forward" aria-hidden="true"><use href="#i-back"/></svg></button>
+    <p class="hint billing-change-hint" data-i18n="Доступ и лимиты обновляются автоматически." data-i18n-en="Access and limits update automatically.">Доступ и лимиты обновляются автоматически.</p>
+    <section id="billingPlans" class="plan-picker" aria-labelledby="billingPlansTitle" hidden>
+      <div class="plan-picker-head"><h3 id="billingPlansTitle" tabindex="-1" data-i18n="Выберите тариф" data-i18n-en="Choose a plan">Выберите тариф</h3><button id="billingCancelChange" class="text-link" data-i18n="Свернуть" data-i18n-en="Close">Свернуть</button></div>
+      <p class="hint" data-i18n="Общий лимит на все каналы. Продление вручную." data-i18n-en="One shared allowance across all channels. Renew manually.">Общий лимит на все каналы. Продление вручную.</p>
+      <p id="billingPlansStatus" class="hint" role="status"></p>
+      <button id="billingPlansRetry" class="ghost wide" hidden data-i18n="Попробовать снова" data-i18n-en="Try again">Попробовать снова</button>
+      <div id="billingPlanOptions" class="plan-options"></div>
+      <div id="billingPlanSelection" class="plan-selection" hidden></div>
+    </section>
   </section>
 
   <!-- админ -->
@@ -449,7 +457,7 @@
     <div class="card">
       <div class="promo-form">
         <span class="select-wrap"><select id="promoPlan"></select></span>
-        <input type="number" id="promoCount" value="5" min="1" max="50" class="num wide-num" title="сколько кодов" data-i18n-title="сколько кодов" data-i18n-title-en="number of codes">
+        <input type="number" id="promoCount" value="5" min="1" max="50" class="promo-count" title="сколько кодов" data-i18n-title="сколько кодов" data-i18n-title-en="number of codes">
       </div>
       <input type="text" id="promoNote" placeholder="комментарий: кому и за что (необязательно)" data-i18n-placeholder="комментарий: кому и за что (необязательно)" data-i18n-placeholder-en="note: recipient and reason (optional)">
       <div class="access-grid">

@@ -43,6 +43,11 @@ vm.runInContext(readFileSync('app/miniapp/app.js','utf8').replace(/^start\(\);$/
    assert.ok(!$('#planCard').innerHTML.includes('<h3>Администратор</h3>'));
    assert.equal($('#nav').hidden,false);
    assert.equal(boot.user.has_access,true);
+   adminOpen=true;
+   await loadBilling();
+   assert.equal($('#nav').hidden,true);
+   assert.equal($('#channelBar').hidden,true);
+   adminOpen=false;
    api=async()=>{throw new Error('offline')};
    await loadBilling();
    assert.ok($('#billingAvailability').textContent.includes('offline'));

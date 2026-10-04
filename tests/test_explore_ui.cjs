@@ -24,7 +24,7 @@ const assert = require('node:assert/strict');
       if(!path.startsWith('/api/'))return route.fulfill({contentType:'text/javascript',body:''});
       const method=route.request().method();requests.push({path,method});
       let data={};
-      if(path==='/api/bootstrap')data={channels:connected?[channelData]:[],features:{business_mode:false},user:{tg_id:userId,first_name:'Анна',has_access:access,is_admin:false,max_channels:3,daily_limit:10},languages:{ru:'Русский',en:'English'},timezones:['Europe/Moscow'],bot_username:'fixture_bot'};
+      if(path==='/api/bootstrap')data={channels:connected?[channelData]:[],features:{business_mode:false},user:{id:userId,first_name:'Анна',has_access:access,is_admin:false,max_channels:3,daily_limit:10},languages:{ru:'Русский',en:'English'},timezones:['Europe/Moscow'],bot_username:'fixture_bot'};
       else if(path==='/api/billing/subscription')data={status:access?'active':'inactive',current_plan:null,ai_daily_limit:10,ai_used_today:0};
       else if(path==='/api/promo/redeem'){assert.equal(method,'POST');access=true;}
       else if(path==='/api/channels'&&method==='POST'){connected=true;data=channelData;}
@@ -61,7 +61,7 @@ const assert = require('node:assert/strict');
     await page.locator('#nav [data-page="home"]').click();
     await page.locator('#exploreHome [data-go="billing"]').click();
     await page.waitForFunction(()=>!billingLoading);
-    assert.equal(await page.locator('#billingChangePlan').getAttribute('href'),'/account#plans');
+    assert.equal(await page.locator('#billingChangePlan').evaluate(el=>el.tagName),'BUTTON');
     await page.evaluate(()=>{billingCheckedAt=0;return refreshBillingAutomatically();});
     await page.waitForFunction(()=>!billingLoading);
     await page.locator('#billingBack').click();
