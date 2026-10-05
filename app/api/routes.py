@@ -235,17 +235,17 @@ async def update_channel(
                 raise HTTPException(422, 'Для ежедневных предложений заполните название и услуги компании')
         query, values = settings_update('channels', fields, channel_id)
         await conn.execute(query, *values)
-        if fields.get('autopost') == 0 or fields.get('digest_enabled') == 0:
+        if fields.get('business_mode') and not fresh['business_mode']:
+            await conn.execute("UPDATE posts SET status='pending',business_draft=1,publish_at=NULL, "
+                "reason='Включён бизнес-режим: требуется согласование' WHERE channel_id=$1 "
+                "AND status IN ('approved','digest')", channel_id)
+        elif fields.get('autopost') == 0 or fields.get('digest_enabled') == 0:
             # Already prepared items must remain reachable in the review feed
             # when the user disables the mechanism that would have sent them.
             await conn.execute(
                 "UPDATE posts SET status='pending',publish_at=NULL,reason='Автоматический режим изменён: требуется проверка' "
                 "WHERE channel_id=$1 AND (status='digest' OR ($2 AND status='approved'))",
                 channel_id, fields.get('autopost') == 0)
-        if fields.get('business_mode') and not fresh['business_mode']:
-            await conn.execute("UPDATE posts SET status='pending',business_draft=1,publish_at=NULL, "
-                "reason='Включён бизнес-режим: требуется согласование' WHERE channel_id=$1 "
-                "AND status IN ('approved','digest')", channel_id)
     if any(fields.get(key) == 0 and channel[key] for key in ('hits_only', 'media_only')):
         await scheduler.reconsider_filtered(channel_id)
     await db.set_kv(f"active:{user['tg_id']}", channel_id)
