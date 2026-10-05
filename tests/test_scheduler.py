@@ -71,9 +71,9 @@ def test_nothing_new_returns_empty():
     assert _pick_new(items, "c/3") == []
 
 
-def test_unknown_last_uid_falls_back_to_recent_tail():
+def test_unknown_last_uid_preserves_entire_bounded_page():
     items = [item(f"c/{i}") for i in range(20)]
-    assert len(_pick_new(items, "c/999")) == 5
+    assert _pick_new(items, "c/999") == items
 
 
 def test_empty_source_is_safe():

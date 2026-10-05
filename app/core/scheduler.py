@@ -186,7 +186,9 @@ def _pick_new(items: list, last_uid: Optional[str]) -> list:
     uids = [i.uid for i in items]
     if last_uid in uids:
         return items[uids.index(last_uid) + 1 :]
-    return items[-5:]
+    # An outage can remove the cursor from a bounded feed. Do not silently drop
+    # all but five stories; age policy and persisted UIDs filter the whole page.
+    return items
 
 
 def _chronological(items: list) -> list:
@@ -226,17 +228,24 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
     median = 0 if source['kind']=='rss' else telegram_web.median_views(items)
 
     items = _chronological(items)
-    fresh = _pick_new(items, source["last_uid"])
+    observed_at = now_utc()
+    # Future-dated items must never advance the cursor. On first connection pick
+    # the newest eligible item, not an embargoed item that hides today's news.
+    eligible = [item for item in items if not news_policy.source_date(item.date)
+                or news_policy.source_date(item.date) <= observed_at + timedelta(minutes=1)]
+    fresh = _pick_new(eligible, source["last_uid"])
     created = 0
     pool = await db.connect()
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Serialize concurrent readers of this source; commit cursor and rows together.
-            current_channel = await conn.fetchrow('SELECT business_mode,paused FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
+            current_channel = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
             if not current_channel or current_channel['business_mode'] or current_channel['paused']:
                 return 0
-            locked = await conn.fetchrow("SELECT last_uid FROM sources WHERE id=$1 FOR UPDATE", source["id"])
-            if not locked or locked["last_uid"] != source["last_uid"]:
+            channel = dict(current_channel)
+            locked = await conn.fetchrow("SELECT * FROM sources WHERE id=$1 FOR UPDATE", source["id"])
+            if (not locked or not locked['enabled'] or locked['channel_id'] != channel['id']
+                    or any(locked[key] != source[key] for key in ('last_uid', 'kind', 'ref'))):
                 return 0  # A newer poll has committed; never rewind its cursor.
             for item in fresh:
                 uid = source_uid(source, item)
@@ -263,11 +272,11 @@ async def poll_source(client: httpx.AsyncClient, channel: dict, source: dict) ->
                     popularity_threshold(item, items, now_utc()) if source['kind'] != 'rss' else None,
                 )
                 created += 1
-            if items:
+            if eligible:
                 await conn.execute(
                     "UPDATE sources SET last_uid=$1, checked_at=$2, error=NULL, "
                     "title=COALESCE(title,$3), median_views=$4 WHERE id=$5",
-                    items[-1].uid, db.utcnow(), title, median or source["median_views"], source["id"],
+                    eligible[-1].uid, db.utcnow(), title, median or source["median_views"], source["id"],
                 )
             else:
                 await conn.execute('UPDATE sources SET checked_at=$1,error=NULL WHERE id=$2', db.utcnow(), source['id'])
@@ -470,7 +479,7 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
     fact_check = json.dumps(result.fact_check, ensure_ascii=False) if result.fact_check else None
     short = len(result.text or "") <= DIGEST_MAX_LEN
 
-    if channel["digest_enabled"] and not channel.get('business_mode') and short and not post["is_manual"] and not result.needs_review:
+    if channel["digest_enabled"] and channel['autopost'] and not channel.get('business_mode') and short and not post["is_manual"] and not result.needs_review:
         await db.execute(
             "UPDATE posts SET status = 'digest', text_out = ?, fact_check = ?, publish_at=NULL, reason=NULL WHERE id = ? AND status='new'",
             (result.text, fact_check, post["id"]),
@@ -553,8 +562,9 @@ async def run_digest(bot: Bot, channel: dict) -> None:
     if channel.get('business_mode'):
         return
     fresh_channel = await db.fetch_one('SELECT * FROM channels WHERE id=?', (channel['id'],))
-    if not fresh_channel or fresh_channel.get('business_mode'):
+    if not fresh_channel or fresh_channel.get('business_mode') or fresh_channel['paused'] or not fresh_channel['digest_enabled']:
         return
+    channel = fresh_channel
     if not await access.owner_has_access(channel["owner_id"]):
         return
     # Until digest moderation is implemented, never auto-send in manual mode.
@@ -603,10 +613,14 @@ async def run_digest(bot: Bot, channel: dict) -> None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             fresh = await conn.fetchrow('SELECT * FROM channels WHERE id=$1 FOR UPDATE', channel['id'])
-            if not fresh or fresh['business_mode'] or fresh['paused'] or not fresh['autopost'] or fresh['digest_sent_on'] == local_day:
+            if (not fresh or fresh['business_mode'] or fresh['paused'] or not fresh['autopost']
+                    or not fresh['digest_enabled'] or fresh['digest_sent_on'] == local_day
+                    or any(fresh[key] != channel[key] for key in ('instructions', 'lang', 'tz', 'digest_time'))):
                 return
-            members = await conn.fetch('SELECT id,status FROM posts WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE', ids)
-            if len(members) != len(ids) or any(r['status'] != 'digest' for r in members):
+            members = await conn.fetch('SELECT id,status,raw_text,text_out FROM posts WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE', ids)
+            originals_by_id = {r['id']: r for r in rows}
+            if (len(members) != len(ids) or any(r['status'] != 'digest'
+                    or any(r[key] != originals_by_id[r['id']][key] for key in ('raw_text', 'text_out')) for r in members)):
                 return
             digest = await conn.fetchrow(
                 "INSERT INTO posts (channel_id, uid, source_title, raw_text, text_out, fact_check, status, is_manual, created_at) "

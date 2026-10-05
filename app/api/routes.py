@@ -10,6 +10,7 @@ import psutil
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from app import db
+from app.sql import settings_update
 from app.ai import gemini, key_pool
 from app.api.auth import (
     active_user,
@@ -232,12 +233,19 @@ async def update_channel(
             profile = json.loads(fields.get('business_profile', fresh['business_profile']))
             if not profile.get('name') or not profile.get('services'):
                 raise HTTPException(422, 'Для ежедневных предложений заполните название и услуги компании')
-        assignments = ', '.join(f'{key}=${i}' for i, key in enumerate(fields, 1))
-        await conn.execute(f'UPDATE channels SET {assignments} WHERE id=${len(fields)+1}', *fields.values(), channel_id)
+        query, values = settings_update('channels', fields, channel_id)
+        await conn.execute(query, *values)
         if fields.get('business_mode') and not fresh['business_mode']:
             await conn.execute("UPDATE posts SET status='pending',business_draft=1,publish_at=NULL, "
                 "reason='Включён бизнес-режим: требуется согласование' WHERE channel_id=$1 "
                 "AND status IN ('approved','digest')", channel_id)
+        elif fields.get('autopost') == 0 or fields.get('digest_enabled') == 0:
+            # Already prepared items must remain reachable in the review feed
+            # when the user disables the mechanism that would have sent them.
+            await conn.execute(
+                "UPDATE posts SET status='pending',publish_at=NULL,reason='Автоматический режим изменён: требуется проверка' "
+                "WHERE channel_id=$1 AND (status='digest' OR ($2 AND status='approved'))",
+                channel_id, fields.get('autopost') == 0)
     if any(fields.get(key) == 0 and channel[key] for key in ('hits_only', 'media_only')):
         await scheduler.reconsider_filtered(channel_id)
     await db.set_kv(f"active:{user['tg_id']}", channel_id)
@@ -894,6 +902,6 @@ async def admin_update_user(
             expected = promo.PLANS.get(plan,{})
             if any(fields.get(k,target[k]) != expected.get(k) for k in ('daily_limit','max_channels')):
                 fields['plan']='custom'
-        assignments = ', '.join(f'{key}=${i}' for i,key in enumerate(fields,1))
-        result = await conn.fetchrow(f'UPDATE users SET {assignments} WHERE tg_id=${len(fields)+1} RETURNING *',*fields.values(),tg_id)
+        query, values = settings_update('users', fields, tg_id)
+        result = await conn.fetchrow(query, *values)
         return dict(result)

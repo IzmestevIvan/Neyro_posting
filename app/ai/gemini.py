@@ -166,8 +166,18 @@ async def _call(
     if not candidates:
         reason = (data.get("promptFeedback") or {}).get("blockReason", "empty response")
         raise AIError(f"{model}: {reason}")
-    parts = (candidates[0].get("content") or {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts).strip()
+    if not isinstance(candidates, list) or not isinstance(candidates[0], dict):
+        raise AIError(f'{model}: некорректная структура ответа')
+    candidate = candidates[0]
+    if candidate.get('finishReason') != 'STOP':
+        # A truncated or safety-blocked response is not an editorially complete post.
+        raise AIError(f'{model}: генерация не завершена')
+    content = candidate.get('content')
+    parts = content.get('parts') if isinstance(content, dict) else None
+    if (not isinstance(parts, list) or not parts or any(not isinstance(p, dict)
+            or not isinstance(p.get('text'), str) for p in parts)):
+        raise AIError(f'{model}: ожидался текстовый ответ')
+    text = ''.join(p['text'] for p in parts if not p.get('thought')).strip()
     if not text:
         raise AIError(f"{model}: {candidates[0].get('finishReason', 'no text')}")
     if search:
@@ -269,13 +279,24 @@ async def generate(
 
 async def generate_json(prompt: str, **kwargs) -> dict:
     raw = await generate(prompt, as_json=True, **kwargs)
-    block = JSON_BLOCK.search(raw)
+    block = JSON_BLOCK.fullmatch(raw.strip())
     payload = block.group(1) if block else raw
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('повторяющееся поле')
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError('недопустимое число')
     try:
-        parsed = json.loads(payload)
-    except json.JSONDecodeError as exc:
+        parsed = json.loads(payload, object_pairs_hook=object_pairs, parse_constant=invalid_constant)
+    except ValueError as exc:
         raise AIError("модель вернула не JSON") from exc
-    return parsed if isinstance(parsed, dict) else {"result": parsed}
+    if not isinstance(parsed, dict):
+        raise AIError('модель вернула не объект JSON')
+    return parsed
 
 
 def verify_model() -> str:

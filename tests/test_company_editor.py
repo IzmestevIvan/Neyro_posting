@@ -57,7 +57,7 @@ async def test_search_transport_requires_grounding_metadata():
         async def post(self,*args,**kwargs):
             assert kwargs['json']['tools']==[{'google_search':{}}]
             assert 'responseMimeType' not in kwargs['json']['generationConfig']
-            return httpx.Response(200,json={'candidates':[{'content':{'parts':[{'text':'Ungrounded answer'}]}}]})
+            return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':'Ungrounded answer'}]}}]})
     with pytest.raises(gemini.AIError,match='подтверждающих'):
         await gemini._call(Client(),'model','secret','prompt',None,0.1,False,search=True)
 
@@ -66,7 +66,7 @@ async def test_search_transport_requires_grounding_metadata():
 async def test_grounded_metadata_is_preserved():
     class Client:
         async def post(self,*args,**kwargs):
-            return httpx.Response(200,json={'candidates':[{'content':{'parts':[{'text':'Company facts'}]},'groundingMetadata':{
+            return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':'Company facts'}]},'groundingMetadata':{
                 'groundingChunks':[{'web':{'uri':'https://example.org','title':'Company'}}],
                 'groundingSupports':[{'segment':{'text':'Company facts'},'groundingChunkIndices':[0]}],
                 'searchEntryPoint':{'renderedContent':'<div>Google</div>'}}}]})
