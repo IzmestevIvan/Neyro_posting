@@ -109,18 +109,21 @@ function formatDate(iso) {
 let lastRenderedStats = null;
 function renderStats(stats) {
   lastRenderedStats = {channelId:channel?.id,stats};
+  const deliveryReview = (stats.waiting?.delivery_review || 0) > 0;
   const cells = [
     ['ok', stats.today, tr("опубликовано сегодня","published today")],
     ['accent-t', stats.pending, tr("ждут проверки","awaiting review")],
     ['', stats.ai_remaining ?? stats.remaining, tr("постов с ИИ осталось","AI posts remaining")],
   ];
-  $('#publishNow').disabled = publishingNow || !!channel.business_mode || !stats.sources || (stats.ai_remaining ?? stats.remaining) <= 0;
+  $('#publishNow').disabled = publishingNow || deliveryReview || !!channel.business_mode || !stats.sources || (stats.ai_remaining ?? stats.remaining) <= 0;
   $('#publishNow').innerHTML = `${tr("Опубликовать сейчас","Publish now")} ${icon('bolt')}`;
   $('#publishHint').textContent = publishingNow ? tr("Проверяю источники и готовлю один свежий пост…","Checking sources and preparing one fresh post…")
+    : deliveryReview ? tr("Сначала сверьте предыдущую отправку с каналом в истории.","First verify the previous delivery in the channel using History.")
     : (stats.ai_remaining ?? stats.remaining) <= 0 ? tr("Дневной лимит исчерпан.","Daily limit reached.")
     : !stats.sources ? tr("Добавьте источник, чтобы подготовить свежий пост.","Add a source to prepare a fresh post.")
     : tr("Найдёт свежий материал, проверит и опубликует один пост сейчас, вне расписания. Старые новости не отправляет.","Finds, checks and publishes one fresh post now, outside the schedule. Old news is skipped.");
-  const next = !stats.sources ? [tr("Подключите первый источник","Connect your first source"), tr("Добавьте канал или RSS-ленту, чтобы получать материалы.","Add a channel or RSS feed to receive content."), 'sources', tr("Добавить источник","Add a source")]
+  const next = deliveryReview ? [tr("Проверьте предыдущую отправку","Verify the previous delivery"), tr("Telegram не подтвердил доставку целиком. Сверьте текст и медиа с каналом, затем сохраните результат в истории.","Telegram did not confirm the entire delivery. Check the text and media in the channel, then record the result in History."), 'history', tr("Открыть историю","Open history")]
+    : !stats.sources ? [tr("Подключите первый источник","Connect your first source"), tr("Добавьте канал или RSS-ленту, чтобы получать материалы.","Add a channel or RSS feed to receive content."), 'sources', tr("Добавить источник","Add a source")]
     : stats.paused ? [tr("Сбор материалов на паузе","Source checks paused"), tr("Чтобы получать новые материалы, снимите паузу в настройках.","Turn off pause in Settings to receive new content."), 'settings', tr("Открыть настройки","Open settings")]
     : stats.pending ? [tr("Есть материалы для проверки","Content is ready for review"), tr("Прочитайте текст и вердикт проверки перед публикацией.","Read the text and check notes before publishing."), 'feed', tr("Проверить посты","Review posts")]
     : [tr("Источники подключены","Sources connected"), stats.mode === 'автопостинг' ? tr("Готовые материалы публикуются по вашим правилам.","Prepared content is published using your rules.") : tr("Новые материалы появятся в разделе «Посты» для вашего одобрения.","New content will appear in Posts for your approval."), 'sources', tr("Посмотреть источники","View sources")];
@@ -131,16 +134,17 @@ function renderStats(stats) {
     .map(([cls, value, label]) => `<div class="stat ${cls}"><b>${value ?? 0}</b><i>${label}</i></div>`)
     .join('');
 
-  $('#status').textContent = stats.paused ? tr("Сбор материалов на паузе","Source checks paused") : stats.mode === 'автопостинг' ? tr("Автопостинг включён","Autoposting enabled") : tr("Публикация после проверки","Publishing after review");
+  $('#status').textContent = deliveryReview ? tr("Отправка ждёт сверки","Delivery needs verification") : stats.paused ? tr("Сбор материалов на паузе","Source checks paused") : stats.mode === 'автопостинг' ? tr("Автопостинг включён","Autoposting enabled") : tr("Публикация после проверки","Publishing after review");
   const waiting = stats.waiting || {};
   const details = [];
   $('#channelBlockers').hidden = !stats.blockers?.length;
-  $('#channelBlockers').textContent = (stats.blockers || []).join(' ');
+  const blockerTranslations = {'Отправка приостановлена: сверьте предыдущий пост с каналом в разделе «История».': 'Delivery is paused: verify the previous post in the channel using History.'};
+  $('#channelBlockers').textContent = (stats.blockers || []).map(text => blockerTranslations[text] ? tr(text,blockerTranslations[text]) : text).join(' ');
   if (waiting.last_published_at) details.push(tr(`Последняя публикация: ${ago(waiting.last_published_at)}.`,`Last published: ${ago(waiting.last_published_at)}.`));
-  if (waiting.next_at) details.push(tr(`Ближайший срок в очереди: ${new Date(waiting.next_at).toLocaleString(uiLocale())}.`,`Next queued time: ${new Date(waiting.next_at).toLocaleString(uiLocale())}.`));
+  if (waiting.next_at && !deliveryReview) details.push(tr(`Ближайший срок в очереди: ${new Date(waiting.next_at).toLocaleString(uiLocale())}.`,`Next queued time: ${new Date(waiting.next_at).toLocaleString(uiLocale())}.`));
   if (waiting.digest) details.push(tr(`В дайджесте: ${waiting.digest}, время выпуска — ${channel.digest_time} (${channel.tz}).`,`In digest: ${waiting.digest}, scheduled at ${channel.digest_time} (${channel.tz}).`));
   if (waiting.processing) details.push(tr(`Ожидают обработки: ${waiting.processing}.`,`Waiting to process: ${waiting.processing}.`));
-  if (!stats.queued && stats.sources) details.push(tr("Очередь пуста — ожидаем подходящие новости. Темп не гарантирует количество постов.","The queue is empty while suitable news is awaited. Pace does not guarantee a number of posts."));
+  if (!stats.queued && stats.sources && !deliveryReview) details.push(tr("Очередь пуста — ожидаем подходящие новости. Темп не гарантирует количество постов.","The queue is empty while suitable news is awaited. Pace does not guarantee a number of posts."));
   if (stats.last_rejection) details.push(tr(`Последний отсев (${ago(stats.last_rejection.created_at)}): ${stats.last_rejection.reason}.`,`Last filtered item (${ago(stats.last_rejection.created_at)}): ${stats.last_rejection.reason}.`));
   $('#queueDetails').hidden = !details.length;
   $('#queueReason').textContent = details.join(' ');
@@ -1763,14 +1767,19 @@ async function start() {
   if (!welcomeSeen()) openWelcome();
 }
 
-$('#app').addEventListener('click', e => { const button = e.target.closest('[data-go]'); if (button) openPage(button.dataset.go); });
+$('#app').addEventListener('click', e => {
+  const button = e.target.closest('[data-go]');
+  if (!button) return;
+  if (button.dataset.go === 'history') { openPage('feed'); switchFeed('history'); }
+  else openPage(button.dataset.go);
+});
 const HISTORY_LABELS = { get expired(){return tr("Устарел","Expired");}, get published(){return tr("Опубликован","Published");}, get failed(){return tr("Ошибка публикации","Publishing error");}, get filtered(){return tr("Отфильтрован","Filtered");}, get duplicate(){return tr("Дубликат","Duplicate");}, get rejected(){return tr("Отклонён","Rejected");}, get approved(){return tr("В очереди","Queued");}, get new(){return tr("Обрабатывается","Processing");}, get digest(){return tr("В дайджесте","In digest");}, get publishing(){return tr("Отправляется","Sending");}, get uncertain(){return tr("Нужна сверка с каналом","Verify delivery in channel");}, get partial(){return tr("Отправлена только часть","Partially delivered");}, get digest_item(){return tr("Включён в дайджест","Included in digest");} };
 async function loadHistory() {
   if (!channel) { if (exploring) renderExploreWorkspace(); return; }
   const current = readTicket('history');
   const rows = await api(`/channels/${channel.id}/history`);
   if (!current()) return;
-  $('#history').innerHTML = rows.length ? tr("<p class=\"hint\">Последние 50 событий обработки.</p>","<p class=\"hint\">Latest 50 processing events.</p>") + rows.map(row => `<article class="post history-item"><header><span>${esc(row.source_title || tr("Ручной пост","Manual post"))}</span><span class="tag">${esc(HISTORY_LABELS[row.status] || row.status)}</span></header><p>${esc(row.preview)}</p>${row.reason ? `<p class="hint">${esc(row.reason)}</p>` : ''}${row.delivery_receipts?.length ? `<p class="hint">${tr("Telegram подтвердил сообщения:","Telegram acknowledged messages:")} ${esc(row.delivery_receipts.flatMap(step => step.message_ids).map(id => '#' + id).join(', '))}</p>` : ''}<span class="hint">${esc(ago(row.published_at || row.created_at))}</span>${['partial','uncertain'].includes(row.status) ? `<div class="acts"><button data-reconcile="confirm_sent" data-id="${row.id}">${tr("Проверено: пост опубликован полностью","Verified: the entire post is published")}</button>${row.status === 'uncertain' ? `<button data-reconcile="confirm_absent" data-id="${row.id}">${tr("Проверено: в канале ничего нет","Verified: nothing appeared in the channel")}</button>` : ''}</div>` : ''}</article>`).join('') : tr("<div class=\"empty-note\">Здесь будет история обработки и публикаций.</div>","<div class=\"empty-note\">Processing and publishing history will appear here.</div>");
+  $('#history').innerHTML = rows.length ? tr("<p class=\"hint\">До 50 событий: сначала отправки, требующие сверки, затем последние события.</p>","<p class=\"hint\">Up to 50 events: deliveries needing verification first, then recent events.</p>") + rows.map(row => `<article class="post history-item"><header><span>${esc(row.source_title || tr("Ручной пост","Manual post"))}</span><span class="tag">${esc(HISTORY_LABELS[row.status] || row.status)}</span></header><p>${esc(row.preview)}</p>${row.reason ? `<p class="hint">${esc(row.reason)}</p>` : ''}${row.delivery_receipts?.length ? `<p class="hint">${tr("Telegram подтвердил сообщения:","Telegram acknowledged messages:")} ${esc(row.delivery_receipts.flatMap(step => step.message_ids).map(id => '#' + id).join(', '))}</p>` : ''}<span class="hint">${esc(ago(row.published_at || row.created_at))}</span>${['partial','uncertain'].includes(row.status) ? `<div class="acts"><button data-reconcile="confirm_sent" data-id="${row.id}">${tr("Проверено: пост опубликован полностью","Verified: the entire post is published")}</button>${row.status === 'uncertain' ? `<button data-reconcile="confirm_absent" data-id="${row.id}">${tr("Проверено: в канале ничего нет","Verified: nothing appeared in the channel")}</button>` : ''}</div>` : ''}</article>`).join('') : tr("<div class=\"empty-note\">Здесь будет история обработки и публикаций.</div>","<div class=\"empty-note\">Processing and publishing history will appear here.</div>");
 }
 function switchFeed(view) {
   feedView = view;

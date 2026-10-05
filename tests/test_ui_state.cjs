@@ -63,5 +63,17 @@ vm.runInContext(readFileSync('app/miniapp/app.js','utf8').replace(/^start\(\);$/
     assert.ok($('#adminUpdated').textContent.includes('offline'));
     assert.equal(monitoringBusy, false);
   })()`, context);
+  vm.runInContext(`
+    channel={id:1};
+    const stats={today:2,pending:0,remaining:10,sources:4,mode:'автопостинг',waiting:{delivery_review:1}};
+    renderStats(stats);
+    assert.equal($('#publishNow').disabled,true);
+    assert.ok($('#status').textContent.includes('сверки'));
+    assert.ok($('#nextStep').innerHTML.includes('data-go="history"'));
+    assert.ok(!$('#queueReason').textContent.includes('Очередь пуста'));
+    renderStats({...stats,waiting:{delivery_review:0}});
+    assert.equal($('#publishNow').disabled,false);
+    assert.ok($('#status').textContent.includes('Автопостинг включён'));
+  `,context);
   console.log('UI state: stale reads, ordered saves, channel lock and safe links passed');
 })().catch(error=>{console.error(error); process.exitCode=1});
