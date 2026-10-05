@@ -112,3 +112,26 @@ async def test_history_keeps_old_delivery_block_visible(store, channel):
     assert len(rows) == 50
     assert rows[0]['id'] == blocked['id']
     assert rows[0]['status'] == 'uncertain'
+
+
+@pytest.mark.asyncio
+async def test_pause_during_ai_does_not_expire_fresh_story(store, channel, monkeypatch):
+    from app.ai.pipeline import Result
+    post = await make_post(store, channel, status='new', text='Fresh independent story')
+    async def process(*args, **kwargs):
+        await store.execute('UPDATE channels SET paused=1 WHERE id=?', (channel['id'],))
+        return Result(True, text='Checked result')
+    monkeypatch.setattr(scheduler.pipeline, 'process', process)
+    bot = FakeBot()
+    await scheduler.process_post(bot, post, channel)
+    saved = await store.fetch_one('SELECT * FROM posts WHERE id=?', (post['id'],))
+    assert saved['status'] == 'new'
+    assert not bot.sent
+    # Resuming must still perform the checks, not publish the discarded AI result.
+    await store.execute('UPDATE channels SET paused=0 WHERE id=?', (channel['id'],))
+    check = AsyncMock(return_value=Result(True, text='Rechecked result'))
+    monkeypatch.setattr(scheduler.pipeline, 'process', check)
+    await scheduler.process_post(bot, saved, channel)
+    check.assert_awaited_once()
+    saved = await store.fetch_one('SELECT * FROM posts WHERE id=?', (post['id'],))
+    assert saved['status'] == 'pending' and saved['text_out'] == 'Rechecked result'

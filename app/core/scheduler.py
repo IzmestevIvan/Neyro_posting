@@ -455,7 +455,11 @@ async def _process_post(bot: Bot, post: dict, channel: dict, *, force_once: bool
     if news_policy.stale(post, channel):
         await db.execute("UPDATE posts SET status='expired',reason='Новость устарела во время обработки' WHERE id=? AND status='new'", (post['id'],))
         return
-    if news_policy.realtime(channel) and (channel['paused'] or not news_policy.window_open(channel, now_utc())):
+    if channel['paused']:
+        # A pause during an AI request is not expiration. Keep the candidate for
+        # a fresh check after resume; do not turn a deployment pause into news loss.
+        return
+    if news_policy.realtime(channel) and not news_policy.window_open(channel, now_utc()):
         await db.execute("UPDATE posts SET status='expired',reason='Рабочее окно завершилось; новость не переносится на завтра' WHERE id=? AND status='new'", (post['id'],))
         return
     if not result.needs_review:
