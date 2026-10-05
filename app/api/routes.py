@@ -255,6 +255,7 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
     waiting = await db.fetch_one(
         "SELECT COUNT(*) FILTER(WHERE status='digest') AS digest, "
         "COUNT(*) FILTER(WHERE status='new') AS processing, "
+        "COUNT(*) FILTER(WHERE status IN ('uncertain','partial')) AS delivery_review, "
         "MIN(publish_at) FILTER(WHERE status='approved') AS next_at, "
         "MAX(published_at) FILTER(WHERE status='published') AS last_published_at "
         "FROM posts WHERE channel_id=?", (channel_id,),
@@ -305,6 +306,8 @@ async def channel_stats(channel_id: int, user: dict = Depends(active_user)) -> d
     )
 
     blockers = []
+    if waiting['delivery_review']:
+        blockers.append('Отправка приостановлена: сверьте предыдущий пост с каналом в разделе «История».')
     if channel['paused']:
         blockers.append('Канал на паузе — снимите паузу в настройках.')
     if features.business_mode_unavailable(channel):
@@ -463,7 +466,7 @@ async def channel_history(channel_id: int, user: dict = Depends(active_user)) ->
     rows = await db.fetch_all(
         "SELECT id, status, reason, source_title, substr(COALESCE(text_out, raw_text), 1, 200) AS preview, "
         "created_at, published_at, business_draft, business_generated, (SELECT receipts FROM delivery_attempts d WHERE d.post_id=posts.id ORDER BY d.id DESC LIMIT 1) AS delivery_receipts FROM posts WHERE channel_id = ? AND status != 'pending' "
-        "ORDER BY id DESC LIMIT 50",
+        "ORDER BY (status IN ('uncertain','partial')) DESC,id DESC LIMIT 50",
         (channel_id,),
     )
 

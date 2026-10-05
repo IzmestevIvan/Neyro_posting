@@ -288,8 +288,6 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                 channel = dict(current_channel)
                 if channel['paused'] or not channel['autopost'] or not news_policy.window_open(channel):
                     raise AlreadyPublished('Автопубликация приостановлена или рабочее окно закрыто')
-                if await conn.fetchval("SELECT 1 FROM posts WHERE channel_id=$1 AND status IN ('publishing','uncertain','partial') LIMIT 1",channel['id']):
-                    raise AlreadyPublished('Предыдущая отправка ещё выполняется или требует сверки')
                 from app.config import PACE_MODES
                 pace = PACE_MODES.get(channel['pace'],0)
                 if pace:
@@ -315,10 +313,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                     raise AlreadyPublished('Фото изменилось. Обновите ленту и согласуйте текст вместе с фото')
             if news_policy.stale(dict(fresh), channel):
                 raise AlreadyPublished('Новость устарела и больше не доступна для публикации')
-            if news_policy.realtime(channel) and not fresh['is_manual'] and await conn.fetchval(
-                "SELECT 1 FROM posts WHERE channel_id=$1 AND is_manual=0 AND created_at>$2 "
-                "AND status IN ('published','publishing','uncertain','partial') LIMIT 1", channel['id'],fresh['created_at']):
-                raise AlreadyPublished('В канале уже вышла более свежая новость')
+            # Publication time alone does not prove that another story is a duplicate.
+            # A fresh retry may legitimately finish after a newer, unrelated story.
             if not (fresh['text_out'] or '').strip():
                 raise AlreadyPublished('нет готового текста — повторите обработку')
             if fresh['fingerprint'] and not fresh['is_manual']:
@@ -332,6 +328,8 @@ async def _publish_post(bot: Bot, post: dict, channel: dict, *, background: bool
                     raise AlreadyPublished('Эта новость уже опубликована или отправляется')
             if await _used_on_connection(conn, channel['owner_id']) >= owner['daily_limit']:
                 raise QuotaExceeded('исчерпан дневной лимит, включая отправляемые посты')
+            if await conn.fetchval("SELECT 1 FROM posts WHERE channel_id=$1 AND status IN ('publishing','uncertain','partial') LIMIT 1", channel['id']):
+                raise AlreadyPublished('Предыдущая отправка ещё выполняется или требует сверки')
             post = dict(fresh)
             attempt_id = await conn.fetchval(
                 'INSERT INTO delivery_attempts (post_id, channel_id, owner_id, worker_id) VALUES ($1,$2,$3,$4) RETURNING id',

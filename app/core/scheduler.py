@@ -133,19 +133,16 @@ def next_window_start(local: datetime, channel: dict) -> datetime:
 
 
 async def expire_news() -> int:
+    # A later publication can be an unrelated story. Only age expires news;
+    # fingerprints and editorial checks handle actual duplicates separately.
     return await db.update(
-        "UPDATE posts p SET status='expired',reason=(CASE WHEN p.created_at < now()-"
-        "CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 THEN interval '1 hour' ELSE interval '24 hours' END "
-        "THEN 'Новость устарела: истёк срок актуальности' ELSE 'В канале уже вышел более свежий материал' END) "
+        "UPDATE posts p SET status='expired',reason='Новость устарела: истёк срок актуальности' "
         "|| CASE WHEN coalesce(p.reason,'')='' THEN '' ELSE '. Предыдущая причина: ' || left(p.reason,300) END "
         "FROM channels c WHERE c.id=p.channel_id "
         "AND (? OR (c.business_mode=0 AND p.business_draft=0 AND p.business_generated=0)) "
         "AND p.is_manual=0 AND p.status IN ('new','pending','approved','failed','digest') "
-        "AND (p.created_at < now()-CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 "
-        "THEN interval '1 hour' ELSE interval '24 hours' END OR "
-        "(c.delay_mode='instant' AND c.digest_enabled=0 AND EXISTS (SELECT 1 FROM posts newer "
-        "WHERE newer.channel_id=p.channel_id AND newer.status='published' AND newer.is_manual=0 "
-        "AND newer.created_at>p.created_at))) "
+        "AND p.created_at < now()-CASE WHEN c.delay_mode='instant' AND c.digest_enabled=0 "
+        "THEN interval '1 hour' ELSE interval '24 hours' END "
         "AND NOT EXISTS(SELECT 1 FROM delivery_attempts d WHERE d.post_id=p.id AND (d.status!='failed' OR d.receipts!='[]'::jsonb))",
         (features.BUSINESS_MODE_ENABLED,))
 
@@ -517,7 +514,7 @@ async def publish_due(bot: Bot, *, active=None) -> None:
         "JOIN channels c ON c.id=p.channel_id WHERE p.status='approved' AND p.channel_id=ANY(?::bigint[]) "
         "AND (? OR (p.business_draft=0 AND p.business_generated=0)) "
         "AND (p.publish_at IS NULL OR p.publish_at<=?) "
-        "ORDER BY p.channel_id,p.created_at DESC,p.id DESC) candidates "
+        "ORDER BY p.channel_id,p.created_at,p.id) candidates "
         "ORDER BY (SELECT max(published_at) FROM posts sent WHERE sent.channel_id=candidates.channel_id "
         "AND sent.status='published') ASC NULLS FIRST,created_at LIMIT ?",
         (eligible, features.BUSINESS_MODE_ENABLED, db.utcnow(),120 if active is None else max(0,2-len(active))),
@@ -758,7 +755,7 @@ async def process_round(bot: Bot, after_channel: int = 0) -> int:
         "(SELECT 1 FROM channels c WHERE c.id=posts.channel_id AND c.business_mode=1)) "
         "AND (? OR (business_draft=0 AND business_generated=0)) "
         "AND (publish_at IS NULL OR publish_at<=now()) "
-        "ORDER BY channel_id,created_at DESC,id DESC) candidates "
+        "ORDER BY channel_id,created_at,id) candidates "
         "ORDER BY (channel_id<=?),channel_id LIMIT 12", (eligible, features.BUSINESS_MODE_ENABLED, after_channel))
     state['processing'] = len(rows)
 
@@ -816,7 +813,7 @@ async def process_loop(bot: Bot) -> None:
                         post = await db.fetch_one("SELECT * FROM posts WHERE channel_id=? AND status='new' "
                             "AND (?=0 OR is_manual=1) AND (publish_at IS NULL OR publish_at<=now()) "
                             "AND (? OR (business_draft=0 AND business_generated=0)) "
-                            "ORDER BY created_at DESC,id DESC LIMIT 1", (cid, channel.get('business_mode',0), features.BUSINESS_MODE_ENABLED))
+                            "ORDER BY created_at,id LIMIT 1", (cid, channel.get('business_mode',0), features.BUSINESS_MODE_ENABLED))
                         if post:
                             active[cid] = asyncio.create_task(run(post, channel))
                             cursor = cid
@@ -917,6 +914,8 @@ async def _publish_fresh_once(bot: Bot, channel: dict) -> dict:
         raise ValueError('Бизнес-режим: подготовьте черновик и подтвердите его в приложении')
     if not await access.owner_has_access(channel['owner_id']):
         raise ValueError('Доступ владельца закрыт')
+    if await db.fetch_one("SELECT id FROM posts WHERE channel_id=? AND status IN ('publishing','uncertain','partial') LIMIT 1", (channel['id'],)):
+        raise ValueError('Предыдущая отправка ещё выполняется или требует сверки в истории канала')
     if await publisher.quota_left(channel['owner_id']) <= 0:
         raise publisher.QuotaExceeded('исчерпан дневной лимит')
     pool = await db.connect()

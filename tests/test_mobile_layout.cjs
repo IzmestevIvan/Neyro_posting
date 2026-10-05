@@ -97,6 +97,25 @@ const assert=require('node:assert/strict');
     assert.equal(await p.locator('#workspaceScroll').evaluate(el=>el.scrollTop),0);
    }
   }
+  // A delivery block must explain the pause and lead to reconciliation, even on mobile.
+  for(const [language,theme] of [['ru','dark'],['en','light']]){
+   await p.setViewportSize({width:320,height:568});
+   await p.locator('#nav [data-page="home"]').click();
+   await p.evaluate(async ({language,theme})=>{
+    NeyroPrefs.setLanguage(language);NeyroPrefs.setTheme(theme);
+    await refreshStats();
+    renderStats({today:2,pending:0,remaining:8,sources:2,queued:0,mode:'автопостинг',
+     blockers:['Отправка приостановлена: сверьте предыдущий пост с каналом в разделе «История».'],
+     waiting:{delivery_review:1},posts_chart:[],subscribers_chart:[]});
+   },{language,theme});
+   assert.equal(await p.locator('#publishNow').isDisabled(),true);
+   await frameCheck(true);await reachable('#nextStep [data-go="history"]');
+   await p.screenshot({path:`${out}/320-${language}-${theme}-delivery-review.png`});captures++;
+   if(language==='en')assert.equal(/[а-яА-Я]/.test(await p.locator('#channelBlockers').innerText()),false);
+   await p.locator('#nextStep [data-go="history"]').click();
+   assert.equal(await p.evaluate(()=>page==='feed'&&feedView==='history'),true);
+   await p.locator('#history').waitFor({state:'visible'});
+  }
   // Simulated keyboard viewport + safe-area offsets. Native IME behavior is a device check.
   await p.setViewportSize({width:390,height:380});
   await p.locator('#nav [data-page="settings"]').click();
