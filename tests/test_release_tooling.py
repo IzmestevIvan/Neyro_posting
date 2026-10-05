@@ -3,12 +3,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 
 def load(name, filename):
@@ -44,6 +46,23 @@ def fixture_files():
 
 
 class BundleSecurity(unittest.TestCase):
+    def test_upload_timeout_is_bounded_and_cleans_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state/'uploads').mkdir()
+            (state/'status').mkdir()
+            class SlowInput:
+                def read(self, _size):
+                    dispatch.upload_timeout(None, None)
+            with patch.object(dispatch, 'STATE', state), \
+                 patch.dict(os.environ, {'SSH_ORIGINAL_COMMAND': f'upload {SHA} '+ 'b'*64}), \
+                 patch.object(dispatch.signal, 'signal'), patch.object(dispatch.signal, 'alarm') as alarm, \
+                 patch.object(dispatch.sys, 'stdin', SimpleNamespace(buffer=SlowInput())):
+                with self.assertRaises(TimeoutError):
+                    dispatch.main()
+                alarm.assert_called_once_with(600)
+            self.assertEqual(list((state/'uploads').iterdir()), [])
+
     def test_valid_bundle_and_commit_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'bundle.tar.gz'

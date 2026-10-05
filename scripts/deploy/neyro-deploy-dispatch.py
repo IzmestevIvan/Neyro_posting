@@ -15,6 +15,12 @@ import time
 STATE = Path('/var/lib/neyro-deploy')
 
 
+def upload_timeout(_signum, _frame):
+    # Raising lets the upload's finally remove partial data. The default SIGALRM
+    # action killed the process and left a partial archive on every slow link.
+    raise TimeoutError('Upload time limit exceeded')
+
+
 def parse_command(command):
     parts = command.split()
     if len(parts) not in (2, 3) or not re.fullmatch(r'[0-9a-f]{40}', parts[1]):
@@ -29,8 +35,9 @@ def parse_command(command):
 
 def main():
     os.umask(0o077)
-    signal.alarm(120)
     action, sha, checksum = parse_command(os.getenv('SSH_ORIGINAL_COMMAND', ''))
+    signal.signal(signal.SIGALRM, upload_timeout)
+    signal.alarm(600 if action == 'upload' else 120)
     if action == 'status':
         path = STATE / 'status' / f'{sha}.json'
         print(path.read_text() if path.exists() else json.dumps({'commit':sha, 'status':'missing'}))
