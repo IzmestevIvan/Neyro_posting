@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.ai import gemini, prompts
+from app.ai import gemini, prompts, safety
 from app.core.filters import AD_THRESHOLD, ad_score, strip_source_artifacts
 
 log = logging.getLogger("pipeline")
@@ -34,6 +34,11 @@ async def process(
     voice_sample: str = "",
     recent_posts: Optional[list[dict]] = None,
 ) -> Result:
+    if any(safety.input_risk(value) for value in (raw_text, instructions, voice_sample)):
+        return Result(False, reason=safety.BLOCK_REASON)
+    # Stored examples are another untrusted source. Omit poisoned history instead
+    # of allowing one old entry to prevent every future legitimate publication.
+    recent_posts = [p for p in (recent_posts or []) if not safety.input_risk(p.get('text_out') or '')]
     text = strip_source_artifacts(raw_text)
     if len(text) < 40:
         return Result(False, reason="слишком короткий текст")
@@ -96,6 +101,8 @@ async def process(
     )
     calls += 1
     rewritten = rewritten.strip()
+    if safety.output_risk(rewritten):
+        return Result(False, reason=safety.BLOCK_REASON, ai_requests=calls)
     if len(rewritten) < 40:
         return Result(False, reason="рерайт пустой или не содержит полноценного поста", retryable=True, ai_requests=calls)
 
@@ -121,6 +128,8 @@ async def process(
             temperature=0.3,
         )
         calls += 1
+        if safety.output_risk(retry):
+            return Result(False, reason=safety.BLOCK_REASON, ai_requests=calls)
         if len(retry.strip()) < 40:
             return Result(False, reason="повторный рерайт пустой или неполный", retryable=True, ai_requests=calls)
         recheck = await _factcheck(text, retry.strip(), api_key)
@@ -142,6 +151,8 @@ async def process(
 
 
 async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> Optional[dict]:
+    if safety.input_risk(original) or safety.output_risk(rewritten):
+        return None
     try:
         check = await gemini.generate_json(
             prompts.factcheck_prompt(original, rewritten),
@@ -170,7 +181,9 @@ async def _factcheck(original: str, rewritten: str, api_key: Optional[str]) -> O
 async def rewrite_with_instruction(
     current: str, instruction: str, lang: str, api_key: Optional[str]
 ) -> str:
-    return (
+    if safety.input_risk(current) or safety.input_risk(instruction):
+        raise gemini.AIError(safety.BLOCK_REASON)
+    result = (
         await gemini.generate(
             prompts.edit_prompt(current, instruction, lang),
             api_key=api_key,
@@ -178,12 +191,17 @@ async def rewrite_with_instruction(
             temperature=0.6,
         )
     ).strip()
+    if safety.output_risk(result) or len(result) < 40:
+        raise gemini.AIError(safety.BLOCK_REASON)
+    return result
 
 
 async def make_digest(
     texts: list[str], instructions: str, lang: str, api_key: Optional[str]
 ) -> str:
-    return (
+    if any(safety.input_risk(text) for text in [*texts, instructions]):
+        raise gemini.AIError(safety.BLOCK_REASON)
+    result = (
         await gemini.generate(
             prompts.digest_prompt(texts, instructions, lang),
             api_key=api_key,
@@ -191,6 +209,9 @@ async def make_digest(
             temperature=0.5,
         )
     ).strip()
+    if safety.output_risk(result) or len(result) < 40:
+        raise gemini.AIError(safety.BLOCK_REASON)
+    return result
 
 
 async def _confirm_ad(raw_text: str, api_key: Optional[str]) -> Optional[dict]:

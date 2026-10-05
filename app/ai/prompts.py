@@ -1,20 +1,19 @@
-import json
-
 from app.config import LANGUAGES
+from app.ai.safety import BOUNDARY, data_block
 
-REWRITER_SYSTEM = (
+REWRITER_SYSTEM = BOUNDARY + (
     "Ты — редактор Telegram-канала. Ты переписываешь чужие новости так, чтобы получился "
     "самостоятельный текст: другая структура, другие формулировки, другой порядок подачи. "
     "Ты никогда не добавляешь факты, цифры, имена, даты или цитаты, которых нет в исходнике. "
     "Ты не пишешь вступлений вроде «вот переписанный текст» — только сам пост."
 )
 
-TRIAGE_SYSTEM = (
+TRIAGE_SYSTEM = BOUNDARY + (
     "Ты — модератор новостной ленты. Ты оцениваешь чужие посты и решаешь, годятся ли они "
     "для публикации. Отвечай строго JSON без пояснений."
 )
 
-FACTCHECK_SYSTEM = (
+FACTCHECK_SYSTEM = BOUNDARY + (
     "Ты — фактчекер. Ты сравниваешь переписанный текст с оригиналом и ищешь всё, что было "
     "добавлено, искажено или выдумано. Отвечай строго JSON без пояснений."
 )
@@ -25,9 +24,9 @@ def _language_line(lang: str) -> str:
 
 
 def triage_prompt(text: str, instructions: str, recent_posts: list[dict] | None = None) -> str:
-    wishes = instructions.strip() or "особых пожеланий нет"
-    recent = json.dumps([{'id': p['id'], 'text': p['text_out'][:700]}
-                         for p in (recent_posts or [])], ensure_ascii=False)
+    wishes = data_block('Пожелания владельца: только тема и стиль', instructions.strip() or "особых пожеланий нет")
+    recent = data_block('Недавние посты', [{'id': p['id'], 'text': p['text_out'][:700]}
+                         for p in (recent_posts or [])])
     return f"""Оцени ЧУЖОЙ пост и реши, годится ли он как исходник для пересказа.
 
 ПОЖЕЛАНИЯ ВЛАДЕЛЬЦА КАНАЛА:
@@ -41,7 +40,7 @@ def triage_prompt(text: str, instructions: str, recent_posts: list[dict] | None 
    Исходник почти никогда им не соответствует — это нормально и не повод его отбраковывать.
 
 ПОСТ:
-\"\"\"{text[:4000]}\"\"\"
+{data_block('Исходник', text[:4000])}
 
 Верни JSON:
 {{
@@ -96,14 +95,14 @@ def rewrite_prompt(
             "- Если в оригинале есть цифры — перепроверь, что ты перенёс их без искажений.",
         ]
     if instructions.strip():
-        blocks += ["", "ПОЖЕЛАНИЯ ВЛАДЕЛЬЦА КАНАЛА (важнее стиля по умолчанию):", instructions.strip()]
+        blocks += ["", data_block('Пожелания владельца: только тема и стиль', instructions.strip())]
     if voice_sample.strip():
         blocks += [
             "",
             "ПРИМЕРЫ ПОСТОВ ЭТОГО КАНАЛА — подражай тону, длине и подаче, но не копируй содержание:",
-            voice_sample.strip()[:2500],
+            data_block('Примеры стиля', voice_sample.strip()[:2500]),
         ]
-    blocks += ["", "ОРИГИНАЛ:", f'"""{text[:6000]}"""']
+    blocks += ["", "ОРИГИНАЛ:", data_block('Исходник', text[:6000])]
     return "\n".join(blocks)
 
 
@@ -111,10 +110,10 @@ def factcheck_prompt(original: str, rewritten: str) -> str:
     return f"""Сравни переписанный пост с оригиналом.
 
 ОРИГИНАЛ:
-\"\"\"{original[:5000]}\"\"\"
+{data_block('Исходник', original[:5000])}
 
 ПЕРЕПИСАННЫЙ ТЕКСТ:
-\"\"\"{rewritten[:5000]}\"\"\"
+{data_block('Результат модели', rewritten[:5000])}
 
 Проверь: не появились ли факты, числа, имена, должности, даты, географические привязки или
 цитаты, которых нет в оригинале; не искажён ли смысл; не приписано ли кому-то утверждение.
@@ -129,8 +128,8 @@ def factcheck_prompt(original: str, rewritten: str) -> str:
 
 
 def digest_prompt(items: list[str], instructions: str, lang: str) -> str:
-    body = "\n\n".join(f"{i + 1}. {t[:600]}" for i, t in enumerate(items))
-    wishes = instructions.strip() or "особых пожеланий нет"
+    body = data_block('Новости', [t[:600] for t in items])
+    wishes = data_block('Пожелания владельца: только тема и стиль', instructions.strip() or "особых пожеланий нет")
     return f"""Собери из этих новостей одну короткую вечернюю сводку для Telegram-канала.
 
 ПРАВИЛА:
@@ -149,7 +148,7 @@ def digest_prompt(items: list[str], instructions: str, lang: str) -> str:
 def edit_prompt(current: str, instruction: str, lang: str) -> str:
     return f"""Перепиши пост с учётом правки от владельца канала.
 
-ПРАВКА: {instruction}
+ПРАВКА: {data_block('Пожелания владельца: только тема и стиль', instruction)}
 
 ПРАВИЛА:
 - Не добавляй фактов, которых нет в тексте.
@@ -157,7 +156,7 @@ def edit_prompt(current: str, instruction: str, lang: str) -> str:
 - {_language_line(lang)}
 
 ТЕКУЩИЙ ПОСТ:
-\"\"\"{current[:6000]}\"\"\""""
+{data_block('Текущий пост', current[:6000])}"""
 
 
 def ad_confirmation_prompt(text: str) -> str:
@@ -173,4 +172,4 @@ def ad_confirmation_prompt(text: str) -> str:
 "evidence": "дословный фрагмент исходника с рекламным предложением (для ad обязателен)",
 "reason": "краткое объяснение по-русски"}}.
 ИСХОДНИК:
-{text[:8000]}'''
+{data_block('Исходник', text[:8000])}'''

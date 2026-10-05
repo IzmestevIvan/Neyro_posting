@@ -34,7 +34,7 @@ async def test_actual_http_attempts(monkeypatch, status):
     monkeypatch.setattr(gemini, 'metrics', metrics)
     monkeypatch.setattr(gemini, 'ai_slots', asyncio.Semaphore(1))
     response = httpx.Response(status if isinstance(status, int) else 200,
-                              json={'candidates':[{'content':{'parts':[{'text':'ok'}]}}]})
+                              json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':'ok'}]}}]})
     post = AsyncMock(return_value=response)
     if status == 'timeout':
         post.side_effect = httpx.ReadTimeout('timeout')
