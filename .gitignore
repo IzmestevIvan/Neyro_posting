@@ -37,3 +37,6 @@ infra/ansible/vault*
 *.tfvars
 *.key
 *.pem
+
+# Private incident recovery material
+.recovery-private/

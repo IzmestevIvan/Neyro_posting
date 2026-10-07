@@ -4,9 +4,11 @@ set -euo pipefail
 umask 077
 root=/var/lib/neyro-reserve
 config=/etc/neyro-reserve
+test ! -e "$config/ACTIVE" || { echo 'Promoted reserve: refusing pull from former primary' >&2; exit 1; }
 mkdir -p "$root/snapshots"
 exec 9>/run/lock/neyro-reserve.lock
 flock -n 9 || exit 0
+test ! -e "$config/ACTIVE" || { echo 'Reserve promoted while waiting for lock' >&2; exit 1; }
 stage=$(mktemp -d "$root/.verify.XXXXXXXX")
 container="neyro-restore-check-$(date +%s)"
 cleanup() {

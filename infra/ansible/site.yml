@@ -4,6 +4,15 @@
   become: true
   serial: 1
   gather_facts: true
+  pre_tasks:
+    - name: Detect emergency promotion before applying the static inventory
+      ansible.builtin.stat:
+        path: /etc/neyro-reserve/ACTIVE
+      register: emergency_active
+    - name: Refuse stale inventory that would reconfigure an active server as reserve
+      ansible.builtin.assert:
+        that: not emergency_active.stat.exists or 'reserve' not in group_names
+        fail_msg: This reserve has been promoted. Reconcile inventory and backup roles before applying baseline.
   tasks:
     - name: Require the supported operating system
       ansible.builtin.assert:
