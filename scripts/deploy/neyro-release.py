@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 
 ROOT = Path('/opt/neyro')
@@ -147,12 +148,28 @@ def verify_health():
             raise RuntimeError('Public health check failed')
 
 
+def wait_for_app_health(timeout=150):
+    deadline = time.monotonic() + timeout
+    while True:
+        if capture(['docker', 'inspect', '--format', '{{.State.Health.Status}}', 'neyro-app-1']) == 'healthy':
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Application health check timed out')
+        time.sleep(3)
+
+
+def restart_workers(override=None):
+    arguments = [] if override is None else ['-f', str(override)]
+    run(compose(*arguments, 'up', '-d', '--no-build', '--no-deps', 'app', 'support'))
+    wait_for_app_health()
+
+
 def rollback(backup, old_images):
     synchronize(backup / 'source')
     run(['docker', 'tag', old_images['app'], 'neyro-posting:latest'])
     override = backup / 'rollback.json'
     override.write_text(json.dumps({'services': {name: {'image': image} for name, image in old_images.items()}}))
-    run(compose('-f', str(override), 'up', '-d', '--no-build', '--no-deps', '--wait', '--wait-timeout', '150', 'app', 'support'))
+    restart_workers(override)
     verify_health()
 
 
@@ -208,7 +225,7 @@ def deploy(commit):
             write_status(commit, 'running', 'activate')
             synchronize(destination)
             run(['docker', 'tag', image, 'neyro-posting:latest'])
-            run(compose('up', '-d', '--no-build', '--no-deps', '--wait', '--wait-timeout', '150', 'app', 'support'))
+            restart_workers()
             verify_health()
         except BaseException:
             write_status(commit, 'running', 'rollback')

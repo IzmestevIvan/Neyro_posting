@@ -170,7 +170,7 @@ class ReleaseRecovery(unittest.TestCase):
             kwargs['stdout'].write(b'encrypted fixture snapshot')
 
     def test_success_keeps_environment_and_does_not_restart_database_proxy(self):
-        with patch.object(release,'run',side_effect=self.fake_run), patch.object(release,'verify_health'):
+        with patch.object(release,'run',side_effect=self.fake_run), patch.object(release,'wait_for_app_health') as wait, patch.object(release,'verify_health'):
             release.deploy(SHA)
         self.assertEqual((self.root/'app/main.py').read_bytes(),b'new app')
         self.assertEqual(self.env.read_text(),'BILLING_ENABLED=0\n')
@@ -179,9 +179,11 @@ class ReleaseRecovery(unittest.TestCase):
         self.assertEqual(len(commands),1)
         self.assertEqual(commands[0][-2:],['app','support'])
         self.assertIn('--no-deps',commands[0])
+        self.assertNotIn('--wait',commands[0])
+        wait.assert_called_once_with()
 
     def test_unhealthy_release_restores_source_and_each_worker_image(self):
-        with patch.object(release,'run',side_effect=self.fake_run), patch.object(release,'verify_health',side_effect=[RuntimeError('bad release'),None]):
+        with patch.object(release,'run',side_effect=self.fake_run), patch.object(release,'wait_for_app_health'), patch.object(release,'verify_health',side_effect=[RuntimeError('bad release'),None]):
             with self.assertRaisesRegex(RuntimeError,'bad release'):
                 release.deploy(SHA)
         self.assertEqual((self.root/'app/main.py').read_bytes(),b'old app')
@@ -238,7 +240,7 @@ class ReleaseRecovery(unittest.TestCase):
                 release.deploy(SHA)
             run.assert_not_called()
         config.write_text(json.dumps({'role': 'primary'}))
-        with patch.object(release, 'run', side_effect=self.fake_run), patch.object(release, 'verify_health'):
+        with patch.object(release, 'run', side_effect=self.fake_run), patch.object(release, 'wait_for_app_health'), patch.object(release, 'verify_health'):
             release.deploy(SHA)
         self.assertEqual(json.loads((self.state / 'status' / f'{SHA}.json').read_text())['status'], 'success')
 

@@ -71,6 +71,7 @@ jobs:
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/site.yml --syntax-check
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/operations.yml --syntax-check
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup-transfer.yml --syntax-check
+      - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/deploy-active.yml --syntax-check
       - name: Validate HA playbooks without production credentials
         run: |
           printf '{}\n' > /tmp/neyro-ha-ci-empty.yml
