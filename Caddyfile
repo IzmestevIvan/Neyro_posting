@@ -1,5 +1,7 @@
 {
 	servers {
+		# Public Docker/edge listeners expose TCP only; do not advertise QUIC.
+		protocols h1 h2
 		max_header_size 32KB
 		timeouts {
 			read_header 5s
@@ -24,6 +26,7 @@
 	}
 
 	header {
+		Alt-Svc "clear"
 		# Telegram opens the panel inside its own WebView, so framing must stay allowed for
 		# telegram.org while everything else is locked down.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

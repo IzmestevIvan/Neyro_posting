@@ -1723,19 +1723,22 @@ function fillOptions(select, entries) {
 }
 
 async function start() {
-  tg?.ready();
-  tg?.expand();
-
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    boot = await api('/bootstrap');
+    tg?.ready();
+    tg?.expand();
+    boot = await api('/bootstrap', {signal: controller.signal});
     if (/^[A-Za-z0-9_]{5,32}$/.test(boot.support_username || '')) {
       $('#supportLink').href = `https://t.me/${boot.support_username}`;
       $('#supportLink').hidden = false;
     }
   } catch (error) {
-    $('#boot').innerHTML = `<div class="card hero"><h2>${tr("Не удалось открыть редакцию","Could not open the workspace")}</h2><p class="muted">${esc(error.message)}</p><p>${tr("Откройте приложение через кнопку в Telegram-боте.","Open the app using the button in the Telegram bot.")}</p><button class="accent" id="retryBoot">${tr("Попробовать снова","Try again")}</button></div>`;
+    $('#boot').innerHTML = `<div class="card hero"><h2>${tr("Не удалось открыть редакцию","Could not open the workspace")}</h2><p class="muted">${esc(controller.signal.aborted ? tr('Сервер не ответил вовремя. Проверьте соединение и повторите попытку.','The server did not respond in time. Check your connection and try again.') : error.message)}</p><p>${tr("Откройте приложение через кнопку в Telegram-боте.","Open the app using the button in the Telegram bot.")}</p><button class="accent" id="retryBoot">${tr("Попробовать снова","Try again")}</button></div>`;
     $('#retryBoot').onclick = start;
     return;
+  } finally {
+    clearTimeout(timer);
   }
 
   refreshLanguageOptions();
