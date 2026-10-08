@@ -7,6 +7,7 @@ config=/etc/neyro-reserve
 test ! -e "$config/ACTIVE"
 exec 9>/run/lock/neyro-reserve.lock
 flock -w 30 9
+test ! -e "$config/ACTIVE" || { echo 'Reserve promoted while waiting for lock; refusing restore' >&2; exit 1; }
 cd /opt/neyro
 for service in app support caddy; do
   # A restarting/paused worker is not a dormant worker: it may resume publication.

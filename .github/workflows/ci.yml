@@ -71,6 +71,12 @@ jobs:
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/site.yml --syntax-check
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/operations.yml --syntax-check
       - run: ansible-playbook -i infra/ansible/inventory.yml infra/ansible/backup-transfer.yml --syntax-check
+      - name: Validate HA playbooks without production credentials
+        run: |
+          printf '{}\n' > /tmp/neyro-ha-ci-empty.yml
+          for playbook in infra/ansible/ha-*.yml infra/ansible/bootstrap-ha.yml; do
+            ansible-playbook -i infra/ansible/inventory.yml "$playbook" --syntax-check -e ha_secrets_file=/tmp/neyro-ha-ci-empty.yml
+          done
       - run: python scripts/ci/check_infrastructure.py
       - name: Render Kubernetes preparation
         run: kubectl kustomize infra/kubernetes > /tmp/kubernetes.yml

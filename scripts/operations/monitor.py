@@ -143,7 +143,7 @@ def recover(state, config):
             return 'deployment_in_progress'
         checks, details = observe(config['role'])
         _, allowed = recovery_decision(state, checks, details, time.time(), config['role'], config.get('auto_recover'))
-        if not allowed or Path('/etc/neyro-reserve').exists():
+        if not allowed or (Path('/etc/neyro-reserve').exists() and not Path('/etc/neyro-reserve/ACTIVE').is_file()):
             return 'guarded'
         # Persist before the attempt. An interrupted restart still consumes budget.
         state['attempts'].append(time.time())

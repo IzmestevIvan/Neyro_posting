@@ -1,0 +1,61 @@
+---
+# Transitional edge: both new nodes forward to the current single writer.
+# This repairs clients with cached multi-A DNS, but is NOT application failover.
+- name: Serve cached DNS clients through redundant entry points
+  hosts: ha_candidates
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install HAProxy
+      ansible.builtin.apt:
+        name: haproxy
+        state: present
+    - name: Configure TLS passthrough with application health checks
+      ansible.builtin.copy:
+        dest: /etc/haproxy/haproxy.cfg
+        mode: '0644'
+        validate: /usr/sbin/haproxy -c -f %s
+        content: |
+          global
+              log /dev/log local0
+              user haproxy
+              group haproxy
+              maxconn 1000
+          defaults
+              log global
+              mode tcp
+              timeout connect 5s
+              timeout client 60s
+              timeout server 60s
+          frontend https
+              bind :443
+              default_backend active_https
+          backend active_https
+              option httpchk
+              http-check send meth GET uri /healthz ver HTTP/1.1 hdr Host flipbazar.ru
+              http-check expect status 200
+              server active 144.31.53.148:443 check inter 5s fall 3 rise 2 check-ssl check-sni flipbazar.ru verify required ca-file /etc/ssl/certs/ca-certificates.crt verifyhost flipbazar.ru
+          frontend http
+              bind :80
+              default_backend active_http
+          backend active_http
+              server active 144.31.53.148:80 check inter 5s fall 3 rise 2
+      notify: Reload HAProxy
+    - name: Permit public web traffic on prepared entry points
+      community.general.ufw:
+        rule: allow
+        port: '{{ item }}'
+        proto: tcp
+      loop: [80, 443]
+    - name: Start entry point
+      ansible.builtin.systemd_service:
+        name: haproxy
+        enabled: true
+        state: started
+    - name: Apply validated routing
+      ansible.builtin.meta: flush_handlers
+  handlers:
+    - name: Reload HAProxy
+      ansible.builtin.systemd_service:
+        name: haproxy
+        state: reloaded

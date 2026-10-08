@@ -6,8 +6,19 @@ all:
     primary:
       hosts:
         neyro_primary:
-          ansible_host: 31.76.244.26
-    reserve:
-      hosts:
-        neyro_reserve:
           ansible_host: 144.31.53.148
+          provider_server_id: srv-17901
+    ha_candidates:
+      hosts:
+        neyro_de:
+          ansible_host: 31.76.100.101
+          provider_server_id: srv-18270
+        neyro_witness:
+          ansible_host: 144.31.238.173
+          provider_server_id: srv-18271
+    reserve:
+      hosts: {}
+    ha:
+      children:
+        primary: {}
+        ha_candidates: {}

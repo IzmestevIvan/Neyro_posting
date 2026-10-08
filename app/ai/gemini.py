@@ -31,17 +31,28 @@ COOLDOWN_MINUTES = 30
 _model_pauses: dict[tuple[str, str, bool], float] = {}
 
 
+# Keep consecutive failures after a pause expires; only a success resets them.
+_model_failures: dict[tuple[str, str, bool], tuple[int, float]] = {}
+
+
 def _pause_model(route_key, detail):
-    seconds = 120 if 'HTTP 429' in detail else 30 if re.search(r'HTTP 5\d\d', detail) else 0
-    if not seconds:
+    base = 120 if 'HTTP 429' in detail else 30 if re.search(r'HTTP 5\d\d', detail) else 0
+    if not base:
         return
     now = time.monotonic()
+    for key, (_, last) in list(_model_failures.items()):
+        if now - last > 3600:
+            del _model_failures[key]
+    count = min(_model_failures.get(route_key, (0, now))[0] + 1, 6)
+    if route_key not in _model_failures and len(_model_failures) >= 256:
+        del _model_failures[min(_model_failures, key=lambda key: _model_failures[key][1])]
+    _model_failures[route_key] = (count, now)
     for key, until in list(_model_pauses.items()):
         if until <= now:
             del _model_pauses[key]
-    if len(_model_pauses) >= 256:
+    if route_key not in _model_pauses and len(_model_pauses) >= 256:
         del _model_pauses[min(_model_pauses, key=_model_pauses.get)]
-    _model_pauses[route_key] = now + seconds
+    _model_pauses[route_key] = now + min(base * 2 ** (count - 1), 1800)
 
 
 JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
@@ -249,6 +260,7 @@ async def generate(
                             else:
                                 result = await _call(client, name, current_key, prompt, system, temperature, as_json)
                         _model_pauses.pop((key_digest, name, search), None)
+                        _model_failures.pop((key_digest, name, search), None)
                         if key_id is not None:
                             await key_pool.succeeded(key_id)
                         if errors:

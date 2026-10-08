@@ -1,0 +1,33 @@
+---
+- name: Test isolated PostgreSQL HA before any production migration
+  hosts: ha
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify production migration has not begun
+      ansible.builtin.stat:
+        path: /etc/neyro-ha/PRODUCTION
+      register: production_marker
+    - name: Refuse staging tests on a production cluster
+      ansible.builtin.assert:
+        that: not production_marker.stat.exists
+    - name: Start the separate staging database only
+      ansible.builtin.systemd_service:
+        name: neyro-patroni
+        state: started
+        enabled: false
+    - name: Wait for local Patroni API
+      ansible.builtin.uri:
+        url: 'http://{{ neyro_mesh_ip }}:8008/health'
+        status_code: [200, 503]
+      register: patroni_health
+      retries: 20
+      delay: 3
+      until: patroni_health.status == 200
+    - name: Check cluster membership without credentials in output
+      ansible.builtin.command: patronictl -c /etc/patroni/neyro.yml list -f json
+      changed_when: false
+      register: cluster_members
+    - name: Show staging membership
+      ansible.builtin.debug:
+        var: cluster_members.stdout

@@ -4,6 +4,19 @@
   become: true
   serial: 1
   gather_facts: true
+  pre_tasks:
+    - name: Require reconciled legacy roles before applying the legacy baseline
+      ansible.builtin.assert:
+        that: groups.get('reserve', []) | length > 0
+        fail_msg: HA transition is in progress. Use the dedicated ha-*.yml playbooks; the legacy reserve baseline is not valid for this inventory.
+    - name: Detect emergency promotion before applying the static inventory
+      ansible.builtin.stat:
+        path: /etc/neyro-reserve/ACTIVE
+      register: emergency_active
+    - name: Refuse stale inventory that would reconfigure an active server as reserve
+      ansible.builtin.assert:
+        that: not emergency_active.stat.exists or 'reserve' not in group_names
+        fail_msg: This reserve has been promoted. Reconcile inventory and backup roles before applying baseline.
   tasks:
     - name: Require the supported operating system
       ansible.builtin.assert:

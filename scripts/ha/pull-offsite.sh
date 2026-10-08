@@ -2,8 +2,8 @@
 # Run on reserve. No production worker is started by this script.
 set -euo pipefail
 umask 077
-root=/var/lib/neyro-reserve
-config=/etc/neyro-reserve
+root=/var/lib/neyro-offsite
+config=/etc/neyro-offsite
 test ! -e "$config/ACTIVE" || { echo 'Promoted reserve: refusing pull from former primary' >&2; exit 1; }
 mkdir -p "$root/snapshots"
 exec 9>/run/lock/neyro-reserve.lock
@@ -16,7 +16,7 @@ cleanup() {
   rm -rf "$stage"
 }
 trap cleanup EXIT
-trap 'date -u +%FT%TZ > /var/lib/neyro-reserve/last-failure; echo "Backup/restore verification failed" >&2' ERR
+trap 'date -u +%FT%TZ > /var/lib/neyro-offsite/last-failure; echo "Backup/restore verification failed" >&2' ERR
 # Avoid filling the system disk. Do not delete recent copies to conceal failure.
 available=$(df -Pk "$root" | awk 'NR==2 {print $4}')
 (( available > 4194304 )) || { echo 'Less than 4 GiB free' >&2; exit 1; }
@@ -26,37 +26,6 @@ primary=$(cat "$config/primary")
 ssh "${ssh_args[@]}" "$primary" snapshot > "$stage/snapshot.tar.gz.age"
 age -d -i "$config/backup.agekey" "$stage/snapshot.tar.gz.age" | tar xzf - -C "$stage" ./database.dump ./image-id ./proxy-image-id ./snapshot-time ./SHA256SUMS
 (cd "$stage" && sha256sum --check SHA256SUMS >/dev/null)
-# Prefer the last verified snapshot identity over the dormant deployment tag.
-# The standby tag deliberately stays unchanged until an explicit restore.
-image_base() {
-  local kind=$1 base
-  if test -s "$root/$kind"; then
-    base=$(cat "$root/$kind")
-  elif test -e "$root/latest.age"; then
-    base=$(age -d -i "$config/backup.agekey" "$root/latest.age" | tar xzOf - "./$2")
-  else
-    base=$(docker image inspect neyro-posting:latest --format '{{.Id}}')
-  fi
-  [[ "$base" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
-  docker image inspect "$base" >/dev/null
-  printf '%s\n' "$base"
-}
-image_id=$(cat "$stage/image-id")
-[[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
-if ! docker image inspect "$image_id" >/dev/null 2>&1; then
-  base_id=$(image_base app-image-id image-id)
-  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
-  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $image_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$image_id"
-  docker image inspect "$image_id" >/dev/null
-fi
-proxy_id=$(cat "$stage/proxy-image-id")
-[[ "$proxy_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
-if ! docker image inspect "$proxy_id" >/dev/null 2>&1; then
-  base_id=$(image_base proxy-image-id proxy-image-id)
-  [[ "$base_id" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
-  ssh "${ssh_args[@]}" "$primary" "image-delta $base_id $proxy_id" | age -d -i "$config/backup.agekey" | /usr/local/sbin/neyro-image-transfer import "$base_id" "$proxy_id"
-  docker image inspect "$proxy_id" >/dev/null
-fi
 # Restore into a disposable, network-isolated PostgreSQL. Never invoke the bot.
 docker run -d --name "$container" --network none --memory 384m --pids-limit 128 \
   --security-opt no-new-privileges:true --tmpfs /var/lib/postgresql/data:rw,size=256m \
@@ -81,3 +50,5 @@ mv "$root/last-success.tmp" "$root/last-success"
 ln -sfn "snapshots/$stamp.tar.gz.age" "$root/latest.age"
 find "$root/snapshots" -type f -name '*.tar.gz.age' -mtime +7 -delete
 printf 'Verified encrypted snapshot: %s\n' "$stamp"
+
+ssh "${ssh_args[@]}" "$primary" verified

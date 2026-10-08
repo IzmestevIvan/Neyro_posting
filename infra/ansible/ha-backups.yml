@@ -1,0 +1,135 @@
+---
+- name: Prepare independent backup receiver
+  hosts: neyro_de
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install backup verification runtime
+      ansible.builtin.apt:
+        name: [docker.io, age]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Start Docker for isolated restore checks
+      ansible.builtin.systemd_service:
+        name: docker
+        state: started
+        enabled: true
+    - name: Create protected backup directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        mode: '0700'
+      loop: [/etc/neyro-offsite, /var/lib/neyro-offsite]
+    - name: Generate separate backup encryption key
+      ansible.builtin.command: age-keygen -o /etc/neyro-offsite/backup.agekey
+      args:
+        creates: /etc/neyro-offsite/backup.agekey
+      no_log: true
+    - name: Derive encryption recipient
+      ansible.builtin.command: age-keygen -y /etc/neyro-offsite/backup.agekey
+      register: backup_recipient
+      changed_when: false
+    - name: Generate restricted export key
+      ansible.builtin.command: ssh-keygen -q -t ed25519 -N '' -f /etc/neyro-offsite/pull_key
+      args:
+        creates: /etc/neyro-offsite/pull_key
+      no_log: true
+    - name: Read public export key
+      ansible.builtin.slurp:
+        src: /etc/neyro-offsite/pull_key.pub
+      register: backup_pull_public
+    - name: Download PostgreSQL restore-check image
+      ansible.builtin.command: docker pull postgres:16-alpine
+      changed_when: false
+- name: Configure active server restricted export
+  hosts: primary
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create export configuration
+      ansible.builtin.file:
+        path: /etc/neyro-backup
+        state: directory
+        mode: '0700'
+    - name: Configure independent encryption recipient
+      ansible.builtin.copy:
+        content: '{{ hostvars.neyro_de.backup_recipient.stdout }}'
+        dest: /etc/neyro-backup/recipient
+        mode: '0600'
+    - name: Install restricted backup commands
+      ansible.builtin.copy:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+        mode: '0755'
+      loop:
+        - {src: '../../scripts/resilience/export-backup.sh', dest: '/usr/local/sbin/neyro-export-backup'}
+        - {src: '../../scripts/ha/backup-endpoint.sh', dest: '/usr/local/sbin/neyro-backup-endpoint'}
+    - name: Authorize only export and verified acknowledgement
+      ansible.builtin.blockinfile:
+        path: /root/.ssh/authorized_keys
+        marker: '# {mark} NEYRO OFFSITE'
+        mode: '0600'
+        block: 'restrict,from="{{ hostvars.neyro_de.ansible_host }}",command="/usr/local/sbin/neyro-backup-endpoint" {{ hostvars.neyro_de.backup_pull_public.content | b64decode | trim }}'
+    - name: Read existing SSH host public key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: active_ssh_public
+- name: Schedule and verify offsite snapshots
+  hosts: neyro_de
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure active backup source
+      ansible.builtin.copy:
+        content: 'root@{{ hostvars.neyro_primary.ansible_host }}'
+        dest: /etc/neyro-offsite/primary
+        mode: '0600'
+    - name: Pin active SSH host identity
+      ansible.builtin.copy:
+        content: '{{ hostvars.neyro_primary.ansible_host }} {{ hostvars.neyro_primary.active_ssh_public.content | b64decode | trim }}'
+        dest: /etc/neyro-offsite/known_hosts
+        mode: '0600'
+    - name: Install verification procedure
+      ansible.builtin.copy:
+        src: ../../scripts/ha/pull-offsite.sh
+        dest: /usr/local/sbin/neyro-pull-offsite
+        mode: '0755'
+    - name: Install backup service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/neyro-offsite.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Encrypted independent backup with isolated restore verification
+          After=network-online.target docker.service
+          Requires=docker.service
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/neyro-pull-offsite
+          TimeoutStartSec=15min
+          Nice=10
+          UMask=0077
+    - name: Install periodic backup timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/neyro-offsite.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Verify independent NeuroPost snapshot every 10 minutes
+          [Timer]
+          OnBootSec=2min
+          OnUnitInactiveSec=10min
+          RandomizedDelaySec=30
+          [Install]
+          WantedBy=timers.target
+    - name: Enable independent backups
+      ansible.builtin.systemd_service:
+        name: neyro-offsite.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+    - name: Perform first verified backup
+      ansible.builtin.systemd_service:
+        name: neyro-offsite.service
+        state: started

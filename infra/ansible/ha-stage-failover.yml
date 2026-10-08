@@ -1,0 +1,94 @@
+---
+- name: Refuse rehearsal if any node has production data
+  hosts: ha
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Check production marker on every node
+      ansible.builtin.stat:
+        path: /etc/neyro-ha/PRODUCTION
+      register: production_marker
+    - name: Require isolated staging nodes
+      ansible.builtin.assert:
+        that: not production_marker.stat.exists
+
+- name: Verify isolated HA data survives loss of its current leader
+  hosts: neyro_de
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require staging-only cluster
+      ansible.builtin.stat:
+        path: /etc/neyro-ha/PRODUCTION
+      register: production_marker
+    - name: Refuse testing a production database
+      ansible.builtin.assert:
+        that: not production_marker.stat.exists
+    - name: Read cluster topology
+      ansible.builtin.uri:
+        url: http://10.77.0.12:8008/cluster
+      register: topology
+    - name: Require all three healthy members and known leader for this rehearsal
+      ansible.builtin.assert:
+        that:
+          - topology.json.members | length == 3
+          - topology.json.members | selectattr('role', 'equalto', 'leader') | map(attribute='name') | list == ['neyro_de']
+          - topology.json.members | selectattr('state', 'equalto', 'creating replica') | list | length == 0
+          - topology.json.members | rejectattr('state', 'in', ['running', 'streaming']) | list | length == 0
+          - topology.json.members | selectattr('role', 'equalto', 'sync_standby') | list | length == 1
+    - name: Create an isolated test record with synchronous commit
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - postgres
+          - --
+          - psql
+          - -h
+          - /var/run/postgresql
+          - -p
+          - '5433'
+          - -v
+          - ON_ERROR_STOP=1
+          - -c
+          - "CREATE TABLE IF NOT EXISTS public.neyro_ha_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.neyro_ha_probe VALUES (1,'verified-before-failover') ON CONFLICT (id) DO UPDATE SET value=excluded.value;"
+    - name: Rehearse staging database leader stop
+      block:
+        - name: Stop only isolated database leader
+          ansible.builtin.systemd_service:
+            name: neyro-patroni
+            state: stopped
+        - name: Wait for a different elected leader
+          ansible.builtin.uri:
+            url: http://10.77.0.13:8008/cluster
+          register: promoted
+          retries: 15
+          delay: 3
+          until: (promoted.json.members | selectattr('role', 'equalto', 'leader') | rejectattr('name', 'equalto', 'neyro_de') | list | length) == 1
+        - name: Select elected node
+          ansible.builtin.set_fact:
+            elected_node: "{{ (promoted.json.members | selectattr('role', 'equalto', 'leader') | first).name }}"
+        - name: Verify committed test row on new leader
+          ansible.builtin.command: runuser -u postgres -- psql -h /var/run/postgresql -p 5433 -Atc "SELECT value FROM public.neyro_ha_probe WHERE id=1"
+          delegate_to: '{{ elected_node }}'
+          register: preserved
+          changed_when: false
+          failed_when: preserved.stdout != 'verified-before-failover'
+        - name: Check real application remains healthy
+          ansible.builtin.uri:
+            url: https://144-31-53-148.sslip.io/healthz
+          register: production_health
+          failed_when: production_health.status != 200 or not production_health.json.ok
+      always:
+        - name: Return former staging leader as a replica
+          ansible.builtin.systemd_service:
+            name: neyro-patroni
+            state: started
+    - name: Confirm former leader recovered
+      ansible.builtin.uri:
+        url: http://10.77.0.12:8008/health
+      register: rejoined
+      retries: 15
+      delay: 3
+      until: rejoined.status == 200

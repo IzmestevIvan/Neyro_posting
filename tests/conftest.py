@@ -19,6 +19,7 @@ def isolated_runtime(monkeypatch):
     monkeypatch.setattr(scheduler, 'ADMIN_IDS', set())
     from app.ai import gemini
     gemini._model_pauses.clear()
+    gemini._model_failures.clear()
     scheduler._alert_times.clear()
     scheduler._source_cache.clear()
     rate_limit._buckets.clear()

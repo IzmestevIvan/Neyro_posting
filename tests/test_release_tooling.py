@@ -3,12 +3,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 
 def load(name, filename):
@@ -44,6 +46,23 @@ def fixture_files():
 
 
 class BundleSecurity(unittest.TestCase):
+    def test_upload_timeout_is_bounded_and_cleans_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state/'uploads').mkdir()
+            (state/'status').mkdir()
+            class SlowInput:
+                def read(self, _size):
+                    dispatch.upload_timeout(None, None)
+            with patch.object(dispatch, 'STATE', state), \
+                 patch.dict(os.environ, {'SSH_ORIGINAL_COMMAND': f'upload {SHA} '+ 'b'*64}), \
+                 patch.object(dispatch.signal, 'signal'), patch.object(dispatch.signal, 'alarm') as alarm, \
+                 patch.object(dispatch.sys, 'stdin', SimpleNamespace(buffer=SlowInput())):
+                with self.assertRaises(TimeoutError):
+                    dispatch.main()
+                alarm.assert_called_once_with(600)
+            self.assertEqual(list((state/'uploads').iterdir()), [])
+
     def test_valid_bundle_and_commit_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'bundle.tar.gz'
@@ -207,6 +226,21 @@ class ReleaseRecovery(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'reserve'):
                 release.deploy(SHA)
             run.assert_not_called()
+
+    def test_promoted_reserve_allows_release_only_with_primary_role(self):
+        release.RESERVE_MARKER.mkdir()
+        (release.RESERVE_MARKER / 'ACTIVE').touch()
+        release.OPERATIONS.mkdir()
+        config = release.OPERATIONS / 'config.json'
+        config.write_text(json.dumps({'role': 'reserve'}))
+        with patch.object(release, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'reserve'):
+                release.deploy(SHA)
+            run.assert_not_called()
+        config.write_text(json.dumps({'role': 'primary'}))
+        with patch.object(release, 'run', side_effect=self.fake_run), patch.object(release, 'verify_health'):
+            release.deploy(SHA)
+        self.assertEqual(json.loads((self.state / 'status' / f'{SHA}.json').read_text())['status'], 'success')
 
 
 if __name__ == '__main__':

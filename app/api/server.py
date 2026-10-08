@@ -100,6 +100,7 @@ def create_app(bot, bot_username: str = "") -> FastAPI:
     page = (
         (MINIAPP_DIR / "index.html")
         .read_text(encoding="utf-8")
+        .replace("/static/boot.js", f"/static/boot.js?v={version}")
         .replace("/static/style.css", f"/static/style.css?v={version}")
         .replace("/static/app.js", f"/static/app.js?v={version}")
         .replace("/static/preferences.js", f"/static/preferences.js?v={version}")
