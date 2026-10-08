@@ -1,0 +1,56 @@
+---
+# Only release tooling; never run the obsolete reserve baseline here.
+- name: Configure restricted CI deployment on the current active server
+  hosts: primary
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read actual operations role
+      ansible.builtin.slurp:
+        src: /etc/neyro-ops/config.json
+      register: ops_config
+      no_log: true
+    - name: Require active role and dedicated public key
+      ansible.builtin.assert:
+        that:
+          - (ops_config.content | b64decode | from_json).role == 'primary'
+          - ci_public_key_file is defined
+    - name: Check fencing marker
+      ansible.builtin.stat:
+        path: /etc/neyro-ops/FENCED
+      register: fenced
+    - name: Refuse setup on a fenced server
+      ansible.builtin.assert:
+        that: not fenced.stat.exists
+    - name: Create private release directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/neyro-deploy, /var/lib/neyro-deploy, /var/lib/neyro-deploy/uploads, /var/lib/neyro-deploy/status, /var/log/neyro-deploy, /opt/neyro/backups]
+    - name: Install release tools
+      ansible.builtin.copy:
+        src: '../../scripts/deploy/{{ item }}'
+        dest: '/usr/local/sbin/{{ item }}'
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [neyro-release.py, neyro-deploy-dispatch.py]
+    - name: Set public release health check
+      ansible.builtin.copy:
+        dest: /etc/neyro-deploy/config.json
+        content: '{"health_url":"https://flipbazar.ru/healthz"}'
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Install dedicated restricted CI public key
+      ansible.builtin.blockinfile:
+        path: /root/.ssh/authorized_keys
+        marker: '# {mark} NEYRO CI DEPLOY'
+        block: 'restrict,command="/usr/local/sbin/neyro-deploy-dispatch.py" {{ lookup("ansible.builtin.file", ci_public_key_file) }}'
+        owner: root
+        group: root
+        mode: '0600'
+        create: false
