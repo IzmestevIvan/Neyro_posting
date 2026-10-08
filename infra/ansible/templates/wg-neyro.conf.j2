@@ -1,5 +1,6 @@
 [Interface]
 Address = {{ neyro_mesh_ip }}/24
+MTU = 1280
 ListenPort = 51820
 PrivateKey = {{ mesh_private.content | b64decode | trim }}
 

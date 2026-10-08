@@ -227,6 +227,21 @@ class ReleaseRecovery(unittest.TestCase):
                 release.deploy(SHA)
             run.assert_not_called()
 
+    def test_promoted_reserve_allows_release_only_with_primary_role(self):
+        release.RESERVE_MARKER.mkdir()
+        (release.RESERVE_MARKER / 'ACTIVE').touch()
+        release.OPERATIONS.mkdir()
+        config = release.OPERATIONS / 'config.json'
+        config.write_text(json.dumps({'role': 'reserve'}))
+        with patch.object(release, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'reserve'):
+                release.deploy(SHA)
+            run.assert_not_called()
+        config.write_text(json.dumps({'role': 'primary'}))
+        with patch.object(release, 'run', side_effect=self.fake_run), patch.object(release, 'verify_health'):
+            release.deploy(SHA)
+        self.assertEqual(json.loads((self.state / 'status' / f'{SHA}.json').read_text())['status'], 'success')
+
 
 if __name__ == '__main__':
     unittest.main()

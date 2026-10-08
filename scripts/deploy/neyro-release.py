@@ -164,7 +164,9 @@ def deploy(commit):
         write_status(commit, 'running', 'validate')
         files = validate_bundle(STATE / 'uploads' / f'{commit}.tar.gz', commit)
         verify_approved_source(commit, files)
-        if RESERVE_MARKER.exists():
+        if RESERVE_MARKER.exists() and not (
+                (RESERVE_MARKER / 'ACTIVE').is_file()
+                and json.loads((OPERATIONS / 'config.json').read_text()).get('role') == 'primary'):
             raise RuntimeError('Deployment on a reserve is forbidden')
         if any((OPERATIONS / name).exists() for name in ('FENCED', 'maintenance')):
             raise RuntimeError('Release blocked by the operations maintenance/fencing guard')

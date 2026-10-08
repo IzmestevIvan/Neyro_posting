@@ -27,7 +27,7 @@ def apply(action):
                 raise RuntimeError('Fenced primary requires a separately reviewed failback')
             (CONFIG / 'maintenance').unlink(missing_ok=True)
         elif action in ('restart_app', 'fence_primary'):
-            if role != 'primary' or Path('/etc/neyro-reserve').exists():
+            if role != 'primary' or (Path('/etc/neyro-reserve').exists() and not Path('/etc/neyro-reserve/ACTIVE').is_file()):
                 raise RuntimeError('Workers must never be started on standby by this tool')
             if action == 'fence_primary':
                 # Persist before Docker operations; an interrupted fence stays guarded.
