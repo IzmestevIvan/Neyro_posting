@@ -1,0 +1,90 @@
+---
+- name: Prepare new HA nodes without starting application workers
+  hosts: ha_candidates
+  become: true
+  serial: 1
+  gather_facts: true
+  tasks:
+    - name: Require supported Ubuntu and an installed administrator key
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '24.04'
+    - name: Check administrator authorized keys before restricting SSH
+      ansible.builtin.slurp:
+        src: /root/.ssh/authorized_keys
+      register: authorized_keys
+      no_log: true
+    - name: Verify the expected administrative key is installed
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.file', '~/.ssh/neyro_deploy.pub').split()[1] in (authorized_keys.content | b64decode)
+      no_log: true
+    - name: Install host preparation tools
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, git, rsync, age, ufw, fail2ban, unattended-upgrades, wireguard-tools]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Restrict SSH to existing keys
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-neyro-managed.conf
+        mode: '0644'
+        content: |
+          PubkeyAuthentication yes
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin prohibit-password
+          MaxAuthTries 3
+          PermitEmptyPasswords no
+          X11Forwarding no
+          AllowAgentForwarding no
+          AllowTcpForwarding no
+    - name: Validate SSH before reload
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+    - name: Reload validated SSH configuration
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+    - name: Permit administration before enabling firewall
+      community.general.ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+    - name: Deny unsolicited inbound connections
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+    - name: Enable host firewall
+      community.general.ufw:
+        state: enabled
+        logging: low
+    - name: Configure brute force protection
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/sshd.local
+        mode: '0644'
+        content: |
+          [sshd]
+          enabled = true
+          backend = systemd
+          maxretry = 4
+          findtime = 10m
+          bantime = 1h
+    - name: Enable periodic security updates without unattended reboot
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/52neyro-security
+        mode: '0644'
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          Unattended-Upgrade::Automatic-Reboot "false";
+    - name: Enable host protection
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: restarted
+      loop: [fail2ban, unattended-upgrades]
+    - name: Check memory and disk availability
+      ansible.builtin.command: '{{ item }}'
+      changed_when: false
+      loop: ['free -m', 'df -h /']

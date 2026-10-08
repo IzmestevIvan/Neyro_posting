@@ -1,0 +1,70 @@
+---
+- name: Prepare encrypted peer network
+  hosts: ha
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install WireGuard tools
+      ansible.builtin.apt:
+        name: wireguard-tools
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Protect WireGuard configuration
+      ansible.builtin.file:
+        path: /etc/wireguard
+        state: directory
+        mode: '0700'
+    - name: Generate a private key once
+      ansible.builtin.shell: umask 077; wg genkey > /etc/wireguard/neyro.key
+      args:
+        creates: /etc/wireguard/neyro.key
+      no_log: true
+    - name: Read private key for local configuration only
+      ansible.builtin.slurp:
+        src: /etc/wireguard/neyro.key
+      register: mesh_private
+      no_log: true
+    - name: Derive peer public key
+      ansible.builtin.shell: wg pubkey < /etc/wireguard/neyro.key
+      register: mesh_public
+      changed_when: false
+      no_log: true
+    - name: Permit WireGuard only from known peers
+      community.general.ufw:
+        rule: allow
+        from_ip: '{{ hostvars[item].ansible_host }}'
+        port: '51820'
+        proto: udp
+      loop: '{{ groups.ha | difference([inventory_hostname]) }}'
+    - name: Permit HA services only through encrypted peer interface
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: wg-neyro
+        from_ip: '{{ hostvars[item.0].neyro_mesh_ip }}'
+        port: '{{ item.1 }}'
+        proto: tcp
+      loop: '{{ (groups.ha | difference([inventory_hostname])) | product([2379,2380,5433,8008,5000,8081]) | list }}'
+    - name: Configure full mesh without changing the default route
+      ansible.builtin.template:
+        src: wg-neyro.conf.j2
+        dest: /etc/wireguard/wg-neyro.conf
+        mode: '0600'
+      no_log: true
+      notify: Restart encrypted mesh
+    - name: Start encrypted peer network
+      ansible.builtin.systemd_service:
+        name: wg-quick@wg-neyro
+        enabled: true
+        state: started
+    - name: Apply peer changes
+      ansible.builtin.meta: flush_handlers
+    - name: Check encrypted peer interface
+      ansible.builtin.command: ip -brief address show wg-neyro
+      changed_when: false
+  handlers:
+    - name: Restart encrypted mesh
+      ansible.builtin.systemd_service:
+        name: wg-quick@wg-neyro
+        state: restarted

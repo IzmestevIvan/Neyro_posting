@@ -1,0 +1,46 @@
+---
+- name: Verify the staged quorum survives one member loss without touching production database
+  hosts: neyro_witness
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require healthy quorum before rehearsal
+      ansible.builtin.command: etcdctl --endpoints=http://10.77.0.11:2379,http://10.77.0.12:2379,http://10.77.0.13:2379 endpoint health
+      environment:
+        ETCDCTL_API: '3'
+      changed_when: false
+    - name: Rehearse loss of the third quorum member
+      block:
+        - name: Stop only the third etcd member
+          ansible.builtin.systemd_service:
+            name: etcd
+            state: stopped
+        - name: Confirm surviving majority stays healthy
+          ansible.builtin.command: etcdctl --endpoints=http://10.77.0.11:2379,http://10.77.0.12:2379 endpoint health
+          environment:
+            ETCDCTL_API: '3'
+          register: majority
+          retries: 5
+          delay: 3
+          until: majority.rc == 0
+          changed_when: false
+        - name: Confirm production stays available
+          ansible.builtin.uri:
+            url: https://144-31-53-148.sslip.io/healthz
+            return_content: true
+          register: production_health
+          failed_when: production_health.status != 200 or not production_health.json.ok
+      always:
+        - name: Restore the third quorum member
+          ansible.builtin.systemd_service:
+            name: etcd
+            state: started
+    - name: Confirm every member has rejoined
+      ansible.builtin.command: etcdctl --endpoints=http://10.77.0.11:2379,http://10.77.0.12:2379,http://10.77.0.13:2379 endpoint health
+      environment:
+        ETCDCTL_API: '3'
+      register: recovered
+      retries: 5
+      delay: 3
+      until: recovered.rc == 0
+      changed_when: false

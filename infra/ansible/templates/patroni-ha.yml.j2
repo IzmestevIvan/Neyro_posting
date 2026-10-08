@@ -1,0 +1,61 @@
+scope: neyro-ha
+namespace: /neyro/
+name: {{ inventory_hostname }}
+restapi:
+  listen: {{ neyro_mesh_ip }}:8008
+  connect_address: {{ neyro_mesh_ip }}:8008
+  authentication:
+    username: ops
+    password: {{ ha_rest_password | to_json }}
+etcd3:
+  hosts: [{% for peer in groups.ha %}"{{ hostvars[peer].neyro_mesh_ip }}:2379"{% if not loop.last %}, {% endif %}{% endfor %}]
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 0
+    synchronous_mode: true
+    synchronous_mode_strict: true
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: 60
+        shared_buffers: 128MB
+        work_mem: 2MB
+        maintenance_work_mem: 32MB
+        max_wal_size: 1GB
+        max_slot_wal_keep_size: 2GB
+        wal_level: replica
+        hot_standby: 'on'
+        wal_log_hints: 'on'
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all all peer
+{% for peer in groups.ha %}
+    - host replication replicator {{ hostvars[peer].neyro_mesh_ip }}/32 scram-sha-256
+    - host all all {{ hostvars[peer].neyro_mesh_ip }}/32 scram-sha-256
+{% endfor %}
+postgresql:
+  listen: {{ neyro_mesh_ip }}:5433
+  connect_address: {{ neyro_mesh_ip }}:5433
+  data_dir: /var/lib/postgresql/neyro-ha
+  bin_dir: /usr/lib/postgresql/16/bin
+  authentication:
+    superuser:
+      username: postgres
+      password: {{ ha_postgres_password | to_json }}
+    replication:
+      username: replicator
+      password: {{ ha_replication_password | to_json }}
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+    password_encryption: scram-sha-256
+watchdog:
+  mode: off
+# Production activation requires an independently verified fencing mechanism.
+# This staging service deliberately remains stopped until that gate is met.

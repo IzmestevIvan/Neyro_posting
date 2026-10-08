@@ -1,0 +1,13 @@
+[Interface]
+Address = {{ neyro_mesh_ip }}/24
+ListenPort = 51820
+PrivateKey = {{ mesh_private.content | b64decode | trim }}
+
+{% for peer in groups.ha if peer != inventory_hostname %}
+[Peer]
+PublicKey = {{ hostvars[peer].mesh_public.stdout }}
+Endpoint = {{ hostvars[peer].ansible_host }}:51820
+AllowedIPs = {{ hostvars[peer].neyro_mesh_ip }}/32
+PersistentKeepalive = 25
+
+{% endfor %}

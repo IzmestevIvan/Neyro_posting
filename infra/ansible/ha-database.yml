@@ -1,0 +1,121 @@
+---
+# Prerequisite: ha-network.yml succeeded. This creates a SEPARATE database on
+# port 5433; it never changes the production Docker database or starts workers.
+- name: Prepare quorum and isolated PostgreSQL HA cluster
+  hosts: ha
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../../.recovery-private/ha-secrets.yml
+  tasks:
+    - name: Require distinct private addresses
+      ansible.builtin.assert:
+        that:
+          - groups.ha | length == 3
+          - neyro_mesh_ip is defined
+    - name: Install database HA packages without package-triggered services
+      ansible.builtin.apt:
+        name: [etcd-server, etcd-client, patroni, postgresql-16, haproxy]
+        state: present
+        policy_rc_d: 101
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Prevent package-default clusters from starting on reboot
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: false
+        masked: true
+        state: stopped
+      loop: [patroni.service, postgresql.service, postgresql@16-main.service]
+    - name: Configure etcd on the encrypted network only
+      ansible.builtin.template:
+        src: etcd-ha.j2
+        dest: /etc/default/etcd
+        mode: '0600'
+      notify: Restart etcd
+    - name: Ensure quorum starts after WireGuard
+      ansible.builtin.file:
+        path: /etc/systemd/system/etcd.service.d
+        state: directory
+        mode: '0755'
+    - name: Order quorum networking
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/etcd.service.d/neyro.conf
+        mode: '0644'
+        content: |
+          [Unit]
+          Requires=wg-quick@wg-neyro.service
+          After=wg-quick@wg-neyro.service
+          [Service]
+          MemoryHigh=192M
+          MemoryMax=256M
+    - name: Start quorum member
+      ansible.builtin.systemd_service:
+        name: etcd
+        enabled: true
+        state: started
+        daemon_reload: true
+    - name: Apply quorum configuration
+      ansible.builtin.meta: flush_handlers
+    - name: Verify quorum endpoints
+      ansible.builtin.command: etcdctl --endpoints=http://{{ neyro_mesh_ip }}:2379 endpoint health
+      environment:
+        ETCDCTL_API: '3'
+      register: quorum_health
+      retries: 10
+      delay: 3
+      until: quorum_health.rc == 0
+      changed_when: false
+    - name: Create isolated database directory
+      ansible.builtin.file:
+        path: /var/lib/postgresql/neyro-ha
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+    - name: Create Patroni configuration directory
+      ansible.builtin.file:
+        path: /etc/patroni
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+    - name: Configure isolated Patroni database
+      ansible.builtin.template:
+        src: patroni-ha.yml.j2
+        dest: /etc/patroni/neyro.yml
+        owner: postgres
+        group: postgres
+        mode: '0600'
+      no_log: true
+    - name: Install dedicated service without starting it during staging
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/neyro-patroni.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=NeuroPost isolated PostgreSQL HA
+          Requires=wg-quick@wg-neyro.service
+          After=network-online.target wg-quick@wg-neyro.service etcd.service
+          [Service]
+          Type=simple
+          User=postgres
+          Group=postgres
+          ExecStart=/usr/bin/patroni /etc/patroni/neyro.yml
+          Restart=on-failure
+          RestartSec=5
+          TimeoutStopSec=60
+          KillMode=process
+          LimitNOFILE=65536
+          MemoryHigh=384M
+          MemoryMax=512M
+          [Install]
+          WantedBy=multi-user.target
+    - name: Reload definitions without migrating production data
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+  handlers:
+    - name: Restart etcd
+      ansible.builtin.systemd_service:
+        name: etcd
+        state: restarted
