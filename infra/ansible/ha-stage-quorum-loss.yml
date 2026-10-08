@@ -1,0 +1,103 @@
+---
+- name: Require an isolated and healthy test cluster
+  hosts: ha
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read production activation marker
+      ansible.builtin.stat:
+        path: /etc/neyro-ha/PRODUCTION
+      register: production_marker
+    - name: Forbid this rehearsal on production
+      ansible.builtin.assert:
+        that: not production_marker.stat.exists
+    - name: Check local database health
+      ansible.builtin.uri:
+        url: 'http://{{ neyro_mesh_ip }}:8008/health'
+    - name: Require healthy quorum
+      ansible.builtin.command: etcdctl --endpoints=http://10.77.0.11:2379,http://10.77.0.12:2379,http://10.77.0.13:2379 endpoint health
+      environment:
+        ETCDCTL_API: '3'
+      changed_when: false
+
+- name: Verify loss of majority prevents writes and recovery restores service
+  hosts: neyro_primary
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Rehearse unavailable coordination majority
+      block:
+        - name: Arm automatic recovery if the controller disconnects
+          ansible.builtin.command:
+            argv:
+              - systemd-run
+              - --unit=neyro-quorum-rehearsal-rescue
+              - --on-active=180s
+              - /usr/bin/systemctl
+              - start
+              - etcd
+          delegate_to: '{{ item }}'
+          loop: '{{ groups.ha_candidates }}'
+        - name: Stop only the two staging coordination members
+          ansible.builtin.systemd_service:
+            name: etcd
+            state: stopped
+          delegate_to: '{{ item }}'
+          loop: '{{ groups.ha_candidates }}'
+        - name: Wait until each isolated database rejects the writer health check
+          ansible.builtin.uri:
+            url: 'http://{{ hostvars[item].neyro_mesh_ip }}:8008/primary'
+            status_code: [200, 503]
+            timeout: 5
+          register: writer_probe
+          until: writer_probe.status == 503
+          retries: 20
+          delay: 3
+          loop: '{{ groups.ha }}'
+        - name: Confirm every database is in recovery rather than accepting writes
+          ansible.builtin.command: runuser -u postgres -- psql -h /var/run/postgresql -p 5433 -Atc "SELECT pg_is_in_recovery()"
+          delegate_to: '{{ item }}'
+          loop: '{{ groups.ha }}'
+          register: read_only_probe
+          changed_when: false
+          until: read_only_probe.rc == 0 and read_only_probe.stdout == 't'
+          retries: 10
+          delay: 3
+        - name: Verify production health during staging loss
+          ansible.builtin.uri:
+            url: https://flipbazar.ru/healthz
+          register: production_health
+          failed_when: production_health.status != 200 or not production_health.json.ok
+      always:
+        - name: Restore both coordination members
+          ansible.builtin.systemd_service:
+            name: etcd
+            state: started
+          delegate_to: '{{ item }}'
+          loop: '{{ groups.ha_candidates }}'
+        - name: Cancel emergency timers after restoration
+          ansible.builtin.systemd_service:
+            name: neyro-quorum-rehearsal-rescue.timer
+            state: stopped
+          delegate_to: '{{ item }}'
+          loop: '{{ groups.ha_candidates }}'
+    - name: Wait for all quorum members to recover
+      ansible.builtin.command: etcdctl --endpoints=http://10.77.0.11:2379,http://10.77.0.12:2379,http://10.77.0.13:2379 endpoint health
+      environment:
+        ETCDCTL_API: '3'
+      register: recovered
+      until: recovered.rc == 0
+      retries: 15
+      delay: 3
+      changed_when: false
+    - name: Wait for exactly one healthy database leader and two streaming replicas
+      ansible.builtin.uri:
+        url: http://10.77.0.11:8008/cluster
+      register: recovered_cluster
+      until:
+        - recovered_cluster.json.members | length == 3
+        - recovered_cluster.json.members | selectattr('role', 'equalto', 'leader') | list | length == 1
+        - recovered_cluster.json.members | selectattr('state', 'equalto', 'streaming') | list | length == 2
+      retries: 20
+      delay: 3

@@ -6,7 +6,7 @@
   become: true
   gather_facts: false
   vars_files:
-    - ../../.recovery-private/ha-secrets.yml
+    - "{{ ha_secrets_file | default('../../.recovery-private/ha-secrets.yml') }}"
   tasks:
     - name: Require distinct private addresses
       ansible.builtin.assert:
