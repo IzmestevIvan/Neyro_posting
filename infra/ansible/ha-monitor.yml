@@ -1,0 +1,81 @@
+---
+- name: Read existing notification routing without exposing credentials
+  hosts: primary
+  gather_facts: false
+  tasks:
+    - name: Read administrator alert configuration
+      ansible.builtin.slurp:
+        src: /etc/neyro-ops/alerts.json
+      register: independent_alert_config
+      no_log: true
+- name: Install independent outage observers
+  hosts: ha_candidates
+  gather_facts: false
+  tasks:
+    - name: Create protected observer directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - /etc/neyro-independent-monitor
+        - /var/lib/neyro-independent-monitor
+        - /opt/neyro-independent-monitor
+    - name: Install observer and debounced notification library
+      ansible.builtin.copy:
+        src: '{{ item.src }}'
+        dest: '/opt/neyro-independent-monitor/{{ item.name }}'
+        mode: '0700'
+      loop:
+        - {src: '../../scripts/ha/monitor.py', name: 'monitor.py'}
+        - {src: '../../scripts/resilience/alerts.py', name: 'alerts.py'}
+    - name: Install existing notification routing
+      ansible.builtin.copy:
+        content: '{{ hostvars.neyro_primary.independent_alert_config.content | b64decode }}'
+        dest: /etc/neyro-independent-monitor/alerts.json
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Install independent monitor service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/neyro-independent-monitor.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Independent NeuroPost availability and backup observer
+          After=network-online.target
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/python3 /opt/neyro-independent-monitor/monitor.py {{ '--backup' if inventory_hostname == 'neyro_de' else '' }}
+          TimeoutStartSec=60
+          UMask=0077
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          ReadWritePaths=/var/lib/neyro-independent-monitor
+    - name: Install independent monitor timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/neyro-independent-monitor.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Observe NeuroPost independently every minute
+          [Timer]
+          OnBootSec=30s
+          OnUnitInactiveSec=60s
+          RandomizedDelaySec=5
+          [Install]
+          WantedBy=timers.target
+    - name: Enable independent monitor
+      ansible.builtin.systemd_service:
+        name: neyro-independent-monitor.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+    - name: Verify initial observation without sending a test message
+      ansible.builtin.command: '/usr/bin/python3 /opt/neyro-independent-monitor/monitor.py --observe-only {{ "--backup" if inventory_hostname == "neyro_de" else "" }}'
+      changed_when: false

@@ -42,7 +42,7 @@ if test -f Dockerfile.caddy; then cp Dockerfile.caddy "$stage/release/"; fi
 if test -d waf; then cp -a waf "$stage/release/"; fi
 mkdir -p "$stage/release/data"
 if test -d data/logos; then cp -a data/logos "$stage/release/data/"; fi
-docker image inspect neyro-posting:latest --format '{{.Id}}' > "$stage/image-id"
+docker inspect neyro-app-1 --format '{{.Image}}' > "$stage/image-id"
 docker inspect neyro-caddy-1 --format '{{.Image}}' > "$stage/proxy-image-id"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$stage/snapshot-time"
 (cd "$stage" && sha256sum database.dump > SHA256SUMS)

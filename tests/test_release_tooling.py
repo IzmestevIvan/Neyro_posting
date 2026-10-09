@@ -245,5 +245,29 @@ class ReleaseRecovery(unittest.TestCase):
         self.assertEqual(json.loads((self.state / 'status' / f'{SHA}.json').read_text())['status'], 'success')
 
 
+class WorkerHealth(unittest.TestCase):
+    def run_probe(self, statuses, *, health='healthy', timeout=4, stable_seconds=2):
+        states = iter(statuses)
+        def capture(args):
+            return json.dumps(next(states)) if args[-1] == 'neyro-support-1' else health
+        with patch.object(release, 'capture', side_effect=capture), \
+             patch.object(release.time, 'monotonic', side_effect=range(100)), \
+             patch.object(release.time, 'sleep'):
+            release.wait_for_app_health(timeout=timeout, stable_seconds=stable_seconds)
+
+    def test_support_must_remain_running(self):
+        good = {'id': 'worker', 'status': 'running', 'restarts': 0}
+        self.run_probe([good] * 5)
+        for bad in ({**good, 'status': 'exited'}, {**good, 'restarts': 1},
+                    {**good, 'id': 'replacement'}):
+            with self.subTest(bad=bad), self.assertRaises(RuntimeError):
+                self.run_probe([good, bad])
+
+    def test_unhealthy_app_times_out_even_with_running_support(self):
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.run_probe([{'id': 'worker', 'status': 'running', 'restarts': 0}] * 10,
+                           health='unhealthy')
+
+
 if __name__ == '__main__':
     unittest.main()

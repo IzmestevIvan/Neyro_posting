@@ -95,6 +95,11 @@
         src: ../../scripts/ha/pull-offsite.sh
         dest: /usr/local/sbin/neyro-pull-offsite
         mode: '0755'
+    - name: Install isolated application restore verification
+      ansible.builtin.copy:
+        src: ../../scripts/ha/verify-restored-app.py
+        dest: /usr/local/lib/neyro-verify-restored-app.py
+        mode: '0644'
     - name: Install backup service
       ansible.builtin.copy:
         dest: /etc/systemd/system/neyro-offsite.service

@@ -1,5 +1,13 @@
 {
 	servers {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 2s
+				allow 31.76.100.101/32 144.31.238.173/32
+				fallback_policy reject
+			}
+			tls
+		}
 		# Public Docker/edge listeners expose TCP only; do not advertise QUIC.
 		protocols h1 h2
 		max_header_size 32KB

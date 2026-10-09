@@ -71,7 +71,7 @@ def _asset_version() -> str:
     каждую сборку новым файлом с точки зрения кеша.
     """
     digest = hashlib.sha256()
-    for name in ("app.js", "style.css", "index.html", "account.html", "account.js", "preferences.js"):
+    for name in ("boot.js", "app.js", "style.css", "index.html", "account.html", "account.js", "preferences.js"):
         path = MINIAPP_DIR / name
         if path.exists():
             digest.update(path.read_bytes())
