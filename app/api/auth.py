@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl
@@ -30,7 +31,7 @@ def verify_init_data(init_data: str) -> dict:
     check_string = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
     secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     expected = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, received):
+    if not re.fullmatch(r"[0-9a-f]{64}", received) or not hmac.compare_digest(expected, received):
         raise HTTPException(401, "подпись не совпадает")
 
     try:

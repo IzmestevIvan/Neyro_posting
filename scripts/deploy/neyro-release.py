@@ -114,7 +114,7 @@ def run(args, **kwargs):
 
 
 def capture(args):
-    return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+    return subprocess.check_output(args, cwd=ROOT, text=True, timeout=30).strip()
 
 
 def compose(*args):
@@ -148,14 +148,31 @@ def verify_health():
             raise RuntimeError('Public health check failed')
 
 
-def wait_for_app_health(timeout=150):
+def wait_for_app_health(timeout=150, stable_seconds=10):
+    """Require both workers to remain up while HTTP health stays green."""
     deadline = time.monotonic() + timeout
+    stable_since = None
+    identity = None
     while True:
-        if capture(['docker', 'inspect', '--format', '{{.State.Health.Status}}', 'neyro-app-1']) == 'healthy':
+        support = json.loads(capture(['docker', 'inspect', '--format',
+            '{"id":{{json .Id}},"status":{{json .State.Status}},"restarts":{{.RestartCount}}}',
+            'neyro-support-1']))
+        if support.get('status') != 'running' or support.get('restarts') != 0:
+            raise RuntimeError('Support worker stopped or restarted during release')
+        current_identity = support.get('id')
+        if not current_identity:
+            raise RuntimeError('Support worker identity is missing')
+        if identity is not None and current_identity != identity:
+            raise RuntimeError('Support worker was replaced during release')
+        identity = current_identity
+        healthy = capture(['docker', 'inspect', '--format', '{{.State.Health.Status}}', 'neyro-app-1']) == 'healthy'
+        now = time.monotonic()
+        stable_since = (now if stable_since is None else stable_since) if healthy else None
+        if stable_since is not None and now - stable_since >= stable_seconds:
             return
-        if time.monotonic() >= deadline:
-            raise RuntimeError('Application health check timed out')
-        time.sleep(3)
+        if now >= deadline:
+            raise RuntimeError('Application/worker health check timed out')
+        time.sleep(1)
 
 
 def restart_workers(override=None):

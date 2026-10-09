@@ -1,0 +1,41 @@
+---
+# Install the trusted PROXY listener before enabling send-proxy on the edges.
+- name: Prepare trusted client address transport on the active proxy
+  hosts: primary
+  gather_facts: false
+  tasks:
+    - name: Read previous proxy configuration
+      ansible.builtin.slurp:
+        src: /opt/neyro/Caddyfile
+      register: previous_caddy
+    - name: Validate candidate using the running proxy binary
+      ansible.builtin.command:
+        argv: [docker, exec, '-i', neyro-caddy-1, caddy, validate, --config, /dev/stdin, --adapter, caddyfile]
+        stdin: '{{ lookup("ansible.builtin.file", "../../Caddyfile") }}'
+      changed_when: false
+    - name: Install and reload with automatic configuration rollback
+      block:
+        - name: Update existing bind-mounted inode
+          ansible.builtin.shell: cat > /opt/neyro/Caddyfile
+          args:
+            stdin: '{{ lookup("ansible.builtin.file", "../../Caddyfile") }}'
+        - name: Reload validated proxy configuration
+          ansible.builtin.command: docker exec neyro-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+        - name: Verify direct HTTPS after reload
+          ansible.builtin.uri:
+            url: https://flipbazar.ru/healthz
+            return_content: true
+          register: proxy_health
+          failed_when: proxy_health.status != 200 or proxy_health.json != {'ok':true}
+      rescue:
+        - name: Restore previous bind-mounted configuration
+          ansible.builtin.shell: cat > /opt/neyro/Caddyfile
+          args:
+            stdin: '{{ previous_caddy.content | b64decode }}'
+        - name: Reload previous configuration
+          ansible.builtin.command: docker exec neyro-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+        - name: Refuse edge changes after proxy failure
+          ansible.builtin.fail:
+            msg: Proxy identity preparation failed; previous configuration restored.
+- name: Enable authenticated-by-source client identity on the edges
+  ansible.builtin.import_playbook: ha-edge.yml

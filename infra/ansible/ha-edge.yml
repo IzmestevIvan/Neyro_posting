@@ -34,7 +34,7 @@
               option httpchk
               http-check send meth GET uri /healthz ver HTTP/1.1 hdr Host flipbazar.ru
               http-check expect status 200
-              server active 144.31.53.148:443 check inter 5s fall 3 rise 2 check-ssl check-sni flipbazar.ru verify required ca-file /etc/ssl/certs/ca-certificates.crt verifyhost flipbazar.ru
+              server active 144.31.53.148:443 send-proxy-v2 check-send-proxy check inter 5s fall 3 rise 2 check-ssl check-sni flipbazar.ru verify required ca-file /etc/ssl/certs/ca-certificates.crt verifyhost flipbazar.ru
           frontend http
               bind :80
               default_backend active_http

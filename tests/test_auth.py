@@ -120,3 +120,10 @@ class TestSettingsWhitelist:
 def test_digest_time_rejects_impossible_clocks(value):
     with pytest.raises(HTTPException):
         _clean_settings({"digest_time": value})
+
+
+@pytest.mark.parametrize("signature", ["я", "g" * 64, "a" * 63, "a" * 65, "A" * 64])
+def test_malformed_signature_is_unauthorized(signature):
+    with pytest.raises(HTTPException) as error:
+        auth.verify_init_data(urlencode({**valid_fields(), "hash": signature}))
+    assert error.value.status_code == 401
