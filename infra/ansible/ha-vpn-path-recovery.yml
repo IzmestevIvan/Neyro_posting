@@ -1,0 +1,60 @@
+---
+# Does not unblock identities or change firewall/authentication policy.
+- name: Recover TCP across paths with lost MTU feedback
+  hosts: ha
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Enable and persist black-hole MTU recovery for host listeners
+      ansible.posix.sysctl:
+        name: net.ipv4.tcp_mtu_probing
+        value: '1'
+        sysctl_file: /etc/sysctl.d/91-neyro-vpn-path.conf
+        sysctl_set: true
+        reload: true
+
+- name: Apply recovery to the live Docker proxy without interrupting connections
+  hosts: primary
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read existing Compose settings
+      ansible.builtin.slurp:
+        src: /opt/neyro/docker-compose.yml
+      register: live_compose
+      no_log: true
+    - name: Persist recovery for future proxy recreation
+      ansible.builtin.blockinfile:
+        path: /opt/neyro/docker-compose.yml
+        insertafter: '^  caddy:$'
+        marker: '    # {mark} NEYRO VPN PATH RECOVERY'
+        block: |2
+              sysctls:
+                net.ipv4.tcp_mtu_probing: "1"
+        backup: true
+        validate: /usr/bin/docker compose --project-directory /opt/neyro -f %s config --quiet
+      when: "'net.ipv4.tcp_mtu_probing' not in ((live_compose.content | b64decode | from_yaml).services.caddy.sysctls | default({}))"
+    - name: Find the running proxy network namespace
+      ansible.builtin.command:
+        argv: [docker, inspect, '--format', '{% raw %}{{.State.Pid}}{% endraw %}', neyro-caddy-1]
+      register: proxy_pid
+      changed_when: false
+    - name: Require a running proxy
+      ansible.builtin.assert:
+        that: proxy_pid.stdout | int > 0
+    - name: Read live proxy recovery setting
+      ansible.builtin.command:
+        argv: [nsenter, '-t', '{{ proxy_pid.stdout }}', '-n', sysctl, '-n', net.ipv4.tcp_mtu_probing]
+      register: proxy_mtu
+      changed_when: false
+    - name: Enable recovery inside existing proxy namespace
+      ansible.builtin.command:
+        argv: [nsenter, '-t', '{{ proxy_pid.stdout }}', '-n', sysctl, '-w', net.ipv4.tcp_mtu_probing=1]
+      when: proxy_mtu.stdout != '1'
+      changed_when: true
+    - name: Verify public application remains healthy
+      ansible.builtin.uri:
+        url: https://flipbazar.ru/healthz
+        return_content: true
+      register: health
+      failed_when: health.status != 200 or not health.json.ok

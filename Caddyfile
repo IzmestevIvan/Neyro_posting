@@ -12,7 +12,8 @@
 		protocols h1 h2
 		max_header_size 32KB
 		timeouts {
-			read_header 5s
+			# Allow TCP MTU recovery before closing a VPN TLS handshake.
+			read_header 15s
 			read_body 15s
 			idle 30s
 		}

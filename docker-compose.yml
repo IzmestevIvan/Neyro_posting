@@ -95,6 +95,9 @@ services:
         condition: service_healthy
 
   caddy:
+    # Recover when a VPN path drops large packets and ICMP feedback.
+    sysctls:
+      net.ipv4.tcp_mtu_probing: "1"
     image: caddy:2-alpine
     restart: unless-stopped
     logging: *bounded-logs
