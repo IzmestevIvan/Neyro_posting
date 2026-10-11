@@ -35,7 +35,7 @@ jobs:
         with: {python-version: '3.12', cache: pip, cache-dependency-path: requirements.lock}
       - run: python -m pip install -r requirements.lock -r requirements-dev.txt
       - run: python -m pytest -q --junitxml=artifacts/pytest.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: {name: backend-results, path: artifacts/pytest.xml, retention-days: 7}
   frontend:
@@ -51,7 +51,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: npm run test:browser
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: {name: ui-screenshots, path: artifacts/ui, retention-days: 7}
   infrastructure:
@@ -101,5 +101,5 @@ jobs:
         run: |
           docker run --rm --network none --entrypoint python neyro-posting:ci -c 'import os,asyncpg,fastapi,aiogram; assert os.getuid() == 10001'
           docker run --rm --network none --entrypoint python neyro-posting:ci -m pip inspect > /tmp/runtime-sbom.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with: {name: runtime-package-inventory, path: /tmp/runtime-sbom.json, retention-days: 30}
