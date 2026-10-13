@@ -78,6 +78,79 @@ docker compose down            # остановить всё
 
 ## Как устроено
 
+flowchart LR
+    subgraph SRV["🖥️ СЕРВЕР VPS · Docker"]
+        direction TB
+        DB[("🗄️ PostgreSQL<br/>posts · channels<br/>sources · stats")]
+        LOOPS["🔁 Фоновые циклы<br/>poll 90с · process 10с<br/>publish 20с · stats 30м"]
+    end
+
+    subgraph IN["📥 ИСТОЧНИКИ"]
+        direction TB
+        TG_S["Telegram<br/>t.me/s/"]
+        RSS_S["RSS<br/>feedparser"]
+    end
+
+    subgraph PROC["⚙️ ОБРАБОТКА"]
+        direction TB
+        F["🔍 Фильтры<br/>media · стоп-слова<br/>hits · dedup · ad_score"]
+        AI["🧠 AI Pipeline<br/>fast / balanced / super<br/>триаж · рерайт · фактчек"]
+    end
+
+    subgraph MOD["👤 МОДЕРАЦИЯ"]
+        direction TB
+        CARD["Карточка<br/>в чат"]
+        MINI["Miniapp<br/>одобрение"]
+    end
+
+    subgraph PUB["🚀 ПУБЛИКАЦИЯ"]
+        direction TB
+        ESC["Экранирование<br/>+ водяной знак"]
+        SEND["sendMediaGroup<br/>/ sendMessage"]
+    end
+
+    subgraph CH["📢 КАНАЛ"]
+        direction TB
+        OUT["Telegram<br/>целевой канал"]
+    end
+
+    subgraph STAT["📊 СТАТИСТИКА"]
+        direction TB
+        COL["Сбор просмотров<br/>+ реакций"]
+        UPD["UPDATE stats"]
+    end
+
+    TG_S --> LOOPS
+    RSS_S --> LOOPS
+    LOOPS --> DB
+    DB --> F
+    F --> AI
+    AI --> MOD
+    CARD --> MINI
+    MINI --> PUB
+    AI -->|авто| PUB
+    ESC --> SEND
+    SEND --> OUT
+    OUT --> COL
+    COL --> UPD
+    UPD --> DB
+
+    classDef srv fill:#dbeafe,stroke:#1e40af,stroke-width:2px,color:#000
+    classDef inc fill:#fef3c7,stroke:#92400e,stroke-width:2px,color:#000
+    classDef proc fill:#fae8ff,stroke:#86198f,stroke-width:2px,color:#000
+    classDef mod fill:#e0e7ff,stroke:#3730a3,stroke-width:2px,color:#000
+    classDef pub fill:#dcfce7,stroke:#166534,stroke-width:2px,color:#000
+    classDef ch fill:#000,stroke:#000,stroke-width:2px,color:#fff
+    classDef stat fill:#fce7f3,stroke:#9d174d,stroke-width:2px,color:#000
+
+    class DB,LOOPS srv
+    class TG_S,RSS_S inc
+    class F,AI proc
+    class CARD,MINI mod
+    class ESC,SEND pub
+    class OUT ch
+    class COL,UPD stat
+
 | Слой | Файлы | Задача |
 |---|---|---|
 | Источники | `app/sources/` | `telegram_web` читает публичное превью `t.me/s/<канал>` (текст, фото, видео, просмотры), `rss` — ленты, `web` — обычные страницы для ручных постов |
